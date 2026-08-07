@@ -6,6 +6,24 @@ import { supabase } from "@/lib/supabase/client";
 import { type GroceryItem, upsertItem } from "@/lib/groceryItems";
 import SignInForm from "@/components/SignInForm";
 
+function LeafIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M4 15c0-6 4.5-11 15-11 0 10.5-5 15-11 15-2.5 0-4-1-4-4Z" />
+      <path d="M5 19c3-3 6-6 12-11" />
+    </svg>
+  );
+}
+
 export default function Home() {
   const [session, setSession] = useState<Session | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -163,98 +181,110 @@ export default function Home() {
   }
 
   return (
-    <div className="flex flex-col flex-1 items-center bg-zinc-50 dark:bg-black">
-      <main className="flex w-full max-w-md flex-col gap-6 px-4 py-10 sm:px-6">
-        {isAuthLoading ? (
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Checking session...
+    <div className="flex flex-1 flex-col items-center bg-page px-3 py-3 sm:px-6 sm:py-8">
+      <main className="flex w-full max-w-md flex-col gap-1.5 sm:gap-3">
+        <div className="flex items-center justify-center gap-1 text-muted-foreground">
+          <LeafIcon className="h-3 w-3" />
+          <p className="text-xs font-semibold uppercase tracking-[0.2em]">
+            Hester House
           </p>
-        ) : !session ? (
-          <SignInForm />
-        ) : (
-          <>
-            <div className="flex items-center justify-between">
-              <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
-                Grocery List
-              </h1>
-              <button
-                type="button"
-                onClick={handleSignOut}
-                className="text-sm font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-              >
-                Sign Out
-              </button>
-            </div>
+        </div>
 
-            {errorMessage && (
-              <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-400">
-                {errorMessage}
-              </p>
-            )}
+        <div className="flex flex-col gap-2 rounded-xl bg-surface p-2 sm:gap-4 sm:rounded-3xl sm:border sm:border-border sm:p-6 sm:shadow-sm">
+          {isAuthLoading ? (
+            <p className="p-1 text-sm text-muted-foreground">Checking session...</p>
+          ) : !session ? (
+            <SignInForm />
+          ) : (
+            <div className="flex flex-col gap-2 sm:gap-4">
+              <div className="flex items-center justify-between gap-2">
+                <h1 className="flex items-center gap-1.5 text-xl font-bold tracking-tight text-primary">
+                  <LeafIcon className="h-4 w-4 shrink-0" />
+                  Grocery List
+                </h1>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="shrink-0 rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
+                >
+                  Sign Out
+                </button>
+              </div>
 
-            <form onSubmit={handleAddItem} className="flex gap-2">
-              <input
-                type="text"
-                value={newItemName}
-                onChange={(event) => setNewItemName(event.target.value)}
-                placeholder="Add an item..."
-                aria-label="New grocery item"
-                className="flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-base text-black focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-              />
-              <button
-                type="submit"
-                className="rounded-md bg-black px-4 py-2 text-base font-medium text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-              >
-                Add
-              </button>
-            </form>
+              {errorMessage && (
+                <p className="rounded-xl border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
+                  {errorMessage}
+                </p>
+              )}
 
-            {isLoading ? (
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                Loading grocery list...
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {items.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex items-center gap-3 rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={item.completed}
-                      onChange={() => handleToggleComplete(item)}
-                      aria-label={`Mark ${item.name} as complete`}
-                      className="h-5 w-5 shrink-0"
-                    />
-                    <span
-                      className={`flex-1 text-base ${
-                        item.completed
-                          ? "text-zinc-400 line-through dark:text-zinc-600"
-                          : "text-black dark:text-zinc-50"
+              <form onSubmit={handleAddItem} className="flex gap-2">
+                <input
+                  type="text"
+                  value={newItemName}
+                  onChange={(event) => setNewItemName(event.target.value)}
+                  placeholder="Add an item..."
+                  aria-label="New grocery item"
+                  className="min-h-11 flex-1 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <button
+                  type="submit"
+                  className="min-h-11 shrink-0 rounded-xl bg-primary px-4 text-base font-medium text-primary-foreground transition hover:bg-primary/90 active:bg-primary/80"
+                >
+                  Add
+                </button>
+              </form>
+
+              {isLoading ? (
+                <p className="p-1 text-sm text-muted-foreground">
+                  Loading grocery list...
+                </p>
+              ) : (
+                <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
+                  {items.map((item) => (
+                    <li
+                      key={item.id}
+                      className={`flex items-center gap-2 py-1 ${
+                        item.completed ? "bg-surface-muted" : ""
                       }`}
                     >
-                      {item.name}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteItem(item.id)}
-                      aria-label={`Delete ${item.name}`}
-                      className="rounded-md px-2 py-1 text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
-                    >
-                      Delete
-                    </button>
-                  </li>
-                ))}
-                {items.length === 0 && (
-                  <li className="text-center text-sm text-zinc-500 dark:text-zinc-400">
-                    No items yet.
-                  </li>
-                )}
-              </ul>
-            )}
-          </>
-        )}
+                      <label className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center">
+                        <input
+                          type="checkbox"
+                          checked={item.completed}
+                          onChange={() => handleToggleComplete(item)}
+                          aria-label={`Mark ${item.name} as complete`}
+                          className="h-[18px] w-[18px] accent-primary"
+                        />
+                      </label>
+                      <span
+                        className={`min-w-0 flex-1 break-words text-[15px] leading-snug ${
+                          item.completed
+                            ? "text-muted-foreground line-through"
+                            : "text-foreground"
+                        }`}
+                      >
+                        {item.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteItem(item.id)}
+                        aria-label={`Delete ${item.name}`}
+                        className="shrink-0 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-danger/10 hover:text-danger focus:outline-none focus:ring-2 focus:ring-ring"
+                      >
+                        Delete
+                      </button>
+                    </li>
+                  ))}
+                  {items.length === 0 && (
+                    <li className="px-1 py-6 text-center text-sm text-muted-foreground">
+                      No items yet.
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
       </main>
     </div>
   );

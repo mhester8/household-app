@@ -25,13 +25,11 @@ export default function SignInForm() {
   }
 
   return (
-    <>
-      <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
-        Sign In
-      </h1>
+    <div className="flex flex-col gap-6">
+      <h1 className="text-xl font-semibold text-foreground">Sign In</h1>
 
       {authError && (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-400">
+        <p className="rounded-xl border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
           {authError}
         </p>
       )}
@@ -45,7 +43,7 @@ export default function SignInForm() {
           aria-label="Email"
           autoComplete="email"
           required
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-base text-black focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          className="min-h-11 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <input
           type="password"
@@ -55,16 +53,16 @@ export default function SignInForm() {
           aria-label="Password"
           autoComplete="current-password"
           required
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-base text-black focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          className="min-h-11 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <button
           type="submit"
           disabled={isSigningIn}
-          className="rounded-md bg-black px-4 py-2 text-base font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+          className="mt-1 min-h-11 rounded-xl bg-primary px-4 text-base font-medium text-primary-foreground transition hover:bg-primary/90 active:bg-primary/80 disabled:opacity-50"
         >
           {isSigningIn ? "Signing in..." : "Log In"}
         </button>
       </form>
-    </>
+    </div>
   );
 }
