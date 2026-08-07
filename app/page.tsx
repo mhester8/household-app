@@ -3,38 +3,12 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase/client";
-
-type GroceryItem = {
-  id: string;
-  name: string;
-  completed: boolean;
-  created_at: string;
-};
-
-function sortByCreatedAt(items: GroceryItem[]) {
-  return [...items].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-  );
-}
-
-// Inserts a new row or replaces an existing one with the same id, then re-sorts.
-// Shared by local mutations and incoming Realtime events so a write and the
-// Realtime echo of that same write never produce a duplicate row.
-function upsertItem(currentItems: GroceryItem[], item: GroceryItem) {
-  const exists = currentItems.some((existing) => existing.id === item.id);
-  const nextItems = exists
-    ? currentItems.map((existing) => (existing.id === item.id ? item : existing))
-    : [...currentItems, item];
-  return sortByCreatedAt(nextItems);
-}
+import { type GroceryItem, upsertItem } from "@/lib/groceryItems";
+import SignInForm from "@/components/SignInForm";
 
 export default function Home() {
   const [session, setSession] = useState<Session | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [isSigningIn, setIsSigningIn] = useState(false);
 
   const [items, setItems] = useState<GroceryItem[]>([]);
   const [newItemName, setNewItemName] = useState("");
@@ -132,21 +106,6 @@ export default function Home() {
     };
   }, [userId]);
 
-  async function handleSignIn(event: React.FormEvent) {
-    event.preventDefault();
-    setAuthError(null);
-    setIsSigningIn(true);
-
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-
-    if (error) {
-      setAuthError(error.message);
-    } else {
-      setPassword("");
-    }
-    setIsSigningIn(false);
-  }
-
   async function handleSignOut() {
     await supabase.auth.signOut();
   }
@@ -211,47 +170,7 @@ export default function Home() {
             Checking session...
           </p>
         ) : !session ? (
-          <>
-            <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
-              Sign In
-            </h1>
-
-            {authError && (
-              <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-400">
-                {authError}
-              </p>
-            )}
-
-            <form onSubmit={handleSignIn} className="flex flex-col gap-3">
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="Email"
-                aria-label="Email"
-                autoComplete="email"
-                required
-                className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-base text-black focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-              />
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Password"
-                aria-label="Password"
-                autoComplete="current-password"
-                required
-                className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-base text-black focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-              />
-              <button
-                type="submit"
-                disabled={isSigningIn}
-                className="rounded-md bg-black px-4 py-2 text-base font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-              >
-                {isSigningIn ? "Signing in..." : "Log In"}
-              </button>
-            </form>
-          </>
+          <SignInForm />
         ) : (
           <>
             <div className="flex items-center justify-between">
