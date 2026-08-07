@@ -69,6 +69,28 @@ We add multiple lists, multiple households, categories, quantities, or other fea
 
 ---
 
+## 004 - Deploy on Vercel with login-only Supabase Auth
+
+**Date:** 2026-08-07
+
+**Status:** Active
+
+### Decision
+Deploy Hester House on Vercel at the custom domain hesterhouse.app. Add Supabase Auth (email/password, login-only, no self-registration) as simple access control, replacing the previous anonymous prototype access. User accounts are created manually in the Supabase dashboard, not through self-service sign-up. Both authenticated users share the same grocery_items data with no per-user ownership.
+
+### Why
+Now that the app is deployed at a public domain, anonymous database access is no longer appropriate. The household only has two members, so a simple login-only gate with manually created accounts and a single shared list is enough — building out household membership, roles, or invitations now would be solving a problem that doesn't exist yet.
+
+### Alternatives considered
+- Continue with anonymous/public access now that the app is publicly reachable.
+- Build full household membership with per-user roles, ownership, and invitations immediately.
+- Allow self-service sign-up, or add OAuth/social login.
+
+### Revisit when
+The app needs to support multiple households, sharing beyond these two people, or per-user permissions/ownership.
+
+---
+
 ## Maintenance Guidelines
 
 - Record only meaningful product or architectural decisions.
