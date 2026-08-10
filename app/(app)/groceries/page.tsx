@@ -45,6 +45,11 @@ export default function GroceriesPage() {
   // Unsorted bucket until categorization catches up.
   const [isShoppingMode, setIsShoppingMode] = useState(false);
   const [categoryByItemId, setCategoryByItemId] = useState<Record<string, string>>({});
+  // True only for the first categorization pass right after "Start Shopping"
+  // — keeps the still-all-Unsorted list from flashing before grouping lands.
+  // Later passes (new items, realtime arrivals) never set this; they update
+  // sections quietly in the background instead.
+  const [isInitialCategorizing, setIsInitialCategorizing] = useState(false);
 
   const [isCompletedExpanded, setIsCompletedExpanded] = useState(false);
   const [animatingOutIds, setAnimatingOutIds] = useState<Set<string>>(new Set());
@@ -479,7 +484,8 @@ export default function GroceriesPage() {
   function handleStartShopping() {
     setErrorMessage(null);
     setIsShoppingMode(true);
-    runCategorization();
+    setIsInitialCategorizing(true);
+    runCategorization().finally(() => setIsInitialCategorizing(false));
   }
 
   function handleExitShopping() {
@@ -740,6 +746,25 @@ export default function GroceriesPage() {
     );
   }
 
+  // Lightweight, inline (not full-screen) — shown only for the initial
+  // categorization pass so Shopping Mode doesn't flash an all-Unsorted list
+  // before grouping lands.
+  function renderShoppingModeLoading() {
+    return (
+      <div className="flex flex-col items-center gap-3 py-12 text-center">
+        <div className="flex items-center gap-1.5" aria-hidden>
+          <span className="h-2 w-2 animate-bounce rounded-full bg-primary [animation-delay:-0.3s]" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-primary [animation-delay:-0.15s]" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-primary" />
+        </div>
+        <div>
+          <p className="text-base font-semibold text-foreground">Getting your list ready…</p>
+          <p className="text-sm text-muted-foreground">Sorting items for your shopping trip</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-2 sm:gap-4">
       <div className="flex items-center gap-2">
@@ -787,29 +812,33 @@ export default function GroceriesPage() {
           Loading grocery list...
         </p>
       ) : isShoppingMode ? (
-        <>
-          {renderAddItemForm()}
+        isInitialCategorizing ? (
+          renderShoppingModeLoading()
+        ) : (
+          <>
+            {renderAddItemForm()}
 
-          <div className="flex flex-col gap-3">
-            {shoppingSections.map((section) => (
-              <div key={section.name}>
-                <h2 className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {section.name}
-                </h2>
-                <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
-                  {section.items.map(renderItemRow)}
-                </ul>
-              </div>
-            ))}
-            {shoppingSections.length === 0 && (
-              <p className="px-1 py-6 text-center text-sm text-muted-foreground">
-                Nothing left to buy.
-              </p>
-            )}
-          </div>
+            <div className="flex flex-col gap-3">
+              {shoppingSections.map((section) => (
+                <div key={section.name}>
+                  <h2 className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {section.name}
+                  </h2>
+                  <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
+                    {section.items.map(renderItemRow)}
+                  </ul>
+                </div>
+              ))}
+              {shoppingSections.length === 0 && (
+                <p className="px-1 py-6 text-center text-sm text-muted-foreground">
+                  Nothing left to buy.
+                </p>
+              )}
+            </div>
 
-          {renderCompletedSection()}
-        </>
+            {renderCompletedSection()}
+          </>
+        )
       ) : (
         <>
           {renderAddItemForm()}
