@@ -1,16 +1,36 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
-import { type GroceryItem, upsertItem } from "@/lib/groceryItems";
+import {
+  type GroceryItem,
+  findActiveDuplicate,
+  getGrocerySuggestions,
+  normalizeItemName,
+  upsertItem,
+} from "@/lib/groceryItems";
 import { LeafIcon } from "@/components/LeafIcon";
+import { Toast, type ToastState } from "@/components/Toast";
+
+// How long an undo/error toast stays up before it auto-dismisses. Delete's
+// undo window and its toast share this duration on purpose: once the toast
+// is gone, the delete has already been (or is about to be) sent.
+const DELETE_UNDO_MS = 5000;
+const COMPLETE_TOAST_MS = 5000;
+const ERROR_TOAST_MS = 6000;
+const INFO_TOAST_MS = 2500;
+// Brief fade before a just-completed row actually leaves the active list —
+// long enough to read as intentional, short enough to never feel like a wait.
+const COMPLETE_ANIM_MS = 180;
+const HIGHLIGHT_MS = 2000;
 
 export default function GroceriesPage() {
   const [userId, setUserId] = useState<string | null>(null);
 
   const [items, setItems] = useState<GroceryItem[]>([]);
   const [newItemName, setNewItemName] = useState("");
+  const [isAddFocused, setIsAddFocused] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -18,6 +38,27 @@ export default function GroceriesPage() {
     { name: string; itemIds: string[] }[] | null
   >(null);
   const [isGrouping, setIsGrouping] = useState(false);
+
+  const [isCompletedExpanded, setIsCompletedExpanded] = useState(false);
+  const [animatingOutIds, setAnimatingOutIds] = useState<Set<string>>(new Set());
+  const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [toast, setToast] = useState<ToastState | null>(null);
+
+  // Ids this browser tab created itself, so the realtime INSERT echo of our
+  // own optimistic add is never mistaken for another household member's item.
+  const localItemIdsRef = useRef<Set<string>>(new Set());
+  // Deletes are optimistic immediately but the actual Supabase delete is
+  // held until the undo window elapses, so "Undo" never races a delete
+  // that's already in flight — it just cancels a timer.
+  const pendingDeletesRef = useRef<Map<string, { item: GroceryItem; timer: ReturnType<typeof setTimeout> }>>(
+    new Map()
+  );
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Committing/cancelling an edit unmounts its input, which can synthesize a
+  // trailing blur event — this flag stops that blur from re-committing.
+  const skipNextEditBlurRef = useRef(false);
 
   // The authenticated layout already guarantees a session exists before this
   // page renders; read it locally so the data effects below can keep their
@@ -66,7 +107,22 @@ export default function GroceriesPage() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "grocery_items" },
         (payload) => {
-          setItems((currentItems) => upsertItem(currentItems, payload.new as GroceryItem));
+          const newItem = payload.new as GroceryItem;
+          const isOwnItem = localItemIdsRef.current.has(newItem.id);
+
+          setItems((currentItems) => upsertItem(currentItems, newItem));
+
+          if (!isOwnItem) {
+            setHighlightedIds((current) => new Set(current).add(newItem.id));
+            setTimeout(() => {
+              setHighlightedIds((current) => {
+                if (!current.has(newItem.id)) return current;
+                const next = new Set(current);
+                next.delete(newItem.id);
+                return next;
+              });
+            }, HIGHLIGHT_MS);
+          }
         }
       )
       .on<GroceryItem>(
@@ -98,68 +154,262 @@ export default function GroceriesPage() {
     };
   }, [userId]);
 
-  async function handleAddItem(event: React.FormEvent) {
-    event.preventDefault();
-    const trimmedName = newItemName.trim();
-    if (trimmedName === "") {
+  function showToast(next: ToastState, durationMs: number) {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    setToast(next);
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, durationMs);
+  }
+
+  function dismissToast() {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+    setToast(null);
+  }
+
+  async function addItem(rawName: string) {
+    const trimmed = rawName.trim();
+    if (trimmed === "") {
       return;
     }
 
-    setErrorMessage(null);
-    const { data, error } = await supabase
-      .from("grocery_items")
-      .insert({ name: trimmedName })
-      .select("id, name, completed, created_at")
-      .single();
-
-    if (error || !data) {
-      setErrorMessage(`Could not add item: ${error?.message ?? "Unknown error"}`);
+    const duplicate = findActiveDuplicate(items, trimmed);
+    if (duplicate) {
+      setNewItemName("");
+      showToast({ message: `${duplicate.name} is already on the list` }, INFO_TOAST_MS);
       return;
     }
 
-    setItems((currentItems) => upsertItem(currentItems, data));
+    const id = crypto.randomUUID();
+    const optimisticItem: GroceryItem = {
+      id,
+      name: trimmed,
+      completed: false,
+      created_at: new Date().toISOString(),
+    };
+
+    localItemIdsRef.current.add(id);
+    setItems((currentItems) => upsertItem(currentItems, optimisticItem));
     setNewItemName("");
-  }
 
-  async function handleToggleComplete(item: GroceryItem) {
-    setErrorMessage(null);
     const { data, error } = await supabase
       .from("grocery_items")
-      .update({ completed: !item.completed })
-      .eq("id", item.id)
+      .insert({ id, name: trimmed })
       .select("id, name, completed, created_at")
       .single();
 
     if (error || !data) {
-      setErrorMessage(`Could not update item: ${error?.message ?? "Unknown error"}`);
+      localItemIdsRef.current.delete(id);
+      setItems((currentItems) => currentItems.filter((item) => item.id !== id));
+      showToast(
+        {
+          message: `Couldn't add ${trimmed}`,
+          actionLabel: "Retry",
+          onAction: () => addItem(trimmed),
+          tone: "danger",
+        },
+        ERROR_TOAST_MS
+      );
       return;
     }
 
     setItems((currentItems) => upsertItem(currentItems, data));
   }
 
-  async function handleDeleteItem(id: string) {
-    setErrorMessage(null);
-    const { error } = await supabase.from("grocery_items").delete().eq("id", id);
+  function handleAddItemSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    addItem(newItemName);
+  }
+
+  async function setCompleted(item: GroceryItem, nextCompleted: boolean) {
+    const previousCompleted = item.completed;
+
+    if (nextCompleted) {
+      setAnimatingOutIds((current) => new Set(current).add(item.id));
+      setTimeout(() => {
+        setAnimatingOutIds((current) => {
+          if (!current.has(item.id)) return current;
+          const next = new Set(current);
+          next.delete(item.id);
+          return next;
+        });
+      }, COMPLETE_ANIM_MS);
+    }
+
+    setItems((currentItems) =>
+      currentItems.map((existing) =>
+        existing.id === item.id ? { ...existing, completed: nextCompleted } : existing
+      )
+    );
+
+    if (nextCompleted) {
+      showToast(
+        {
+          message: `${item.name} completed`,
+          actionLabel: "Undo",
+          onAction: () => setCompleted(item, false),
+        },
+        COMPLETE_TOAST_MS
+      );
+    }
+
+    const { error } = await supabase
+      .from("grocery_items")
+      .update({ completed: nextCompleted })
+      .eq("id", item.id);
 
     if (error) {
-      setErrorMessage(`Could not delete item: ${error.message}`);
+      setItems((currentItems) =>
+        currentItems.map((existing) =>
+          existing.id === item.id ? { ...existing, completed: previousCompleted } : existing
+        )
+      );
+      showToast(
+        {
+          message: `Couldn't update ${item.name}`,
+          actionLabel: "Retry",
+          onAction: () => setCompleted(item, nextCompleted),
+          tone: "danger",
+        },
+        ERROR_TOAST_MS
+      );
+    }
+  }
+
+  function handleToggleComplete(item: GroceryItem) {
+    setCompleted(item, !item.completed);
+  }
+
+  function startEdit(item: GroceryItem) {
+    setEditingId(item.id);
+    setEditingName(item.name);
+  }
+
+  function cancelEdit() {
+    skipNextEditBlurRef.current = true;
+    setEditingId(null);
+    setEditingName("");
+  }
+
+  async function renameItem(id: string, previousName: string, nextName: string) {
+    setItems((currentItems) =>
+      currentItems.map((existing) => (existing.id === id ? { ...existing, name: nextName } : existing))
+    );
+
+    const { error } = await supabase.from("grocery_items").update({ name: nextName }).eq("id", id);
+
+    if (error) {
+      setItems((currentItems) =>
+        currentItems.map((existing) => (existing.id === id ? { ...existing, name: previousName } : existing))
+      );
+      showToast(
+        {
+          message: `Couldn't rename ${previousName}`,
+          actionLabel: "Retry",
+          onAction: () => renameItem(id, previousName, nextName),
+          tone: "danger",
+        },
+        ERROR_TOAST_MS
+      );
+    }
+  }
+
+  function commitEdit(item: GroceryItem) {
+    skipNextEditBlurRef.current = true;
+    const trimmed = editingName.trim();
+    const isStillEditing = editingId === item.id;
+    setEditingId(null);
+    setEditingName("");
+
+    if (!isStillEditing || trimmed === "" || trimmed === item.name) {
       return;
     }
 
-    setItems((currentItems) => currentItems.filter((item) => item.id !== id));
+    const duplicate = findActiveDuplicate(items, trimmed, item.id);
+    if (duplicate) {
+      showToast({ message: `${duplicate.name} is already on the list` }, INFO_TOAST_MS);
+      return;
+    }
+
+    renameItem(item.id, item.name, trimmed);
+  }
+
+  function handleDeleteItem(item: GroceryItem) {
+    setItems((currentItems) => currentItems.filter((existing) => existing.id !== item.id));
+
+    const existingPending = pendingDeletesRef.current.get(item.id);
+    if (existingPending) {
+      clearTimeout(existingPending.timer);
+    }
+
+    const timer = setTimeout(() => {
+      pendingDeletesRef.current.delete(item.id);
+      commitDelete(item);
+    }, DELETE_UNDO_MS);
+    pendingDeletesRef.current.set(item.id, { item, timer });
+
+    showToast(
+      {
+        message: `${item.name} deleted`,
+        actionLabel: "Undo",
+        onAction: () => undoDelete(item.id),
+      },
+      DELETE_UNDO_MS
+    );
+  }
+
+  function undoDelete(id: string) {
+    const pending = pendingDeletesRef.current.get(id);
+    if (!pending) {
+      return;
+    }
+    clearTimeout(pending.timer);
+    pendingDeletesRef.current.delete(id);
+    setItems((currentItems) => upsertItem(currentItems, pending.item));
+  }
+
+  async function commitDelete(item: GroceryItem) {
+    const { error } = await supabase.from("grocery_items").delete().eq("id", item.id);
+
+    if (error) {
+      // The undo window already closed but the delete itself failed — put
+      // the item back so local state matches the database, rather than
+      // silently losing it from view while it's still there on the server.
+      setItems((currentItems) => upsertItem(currentItems, item));
+      showToast(
+        {
+          message: `Couldn't delete ${item.name}`,
+          actionLabel: "Retry",
+          onAction: () => handleDeleteItem(item),
+          tone: "danger",
+        },
+        ERROR_TOAST_MS
+      );
+    }
   }
 
   async function handleClearCompleted() {
     setErrorMessage(null);
+    const completedSnapshot = items.filter((item) => item.completed);
+    setItems((currentItems) => currentItems.filter((item) => !item.completed));
+
     const { error } = await supabase.from("grocery_items").delete().eq("completed", true);
 
     if (error) {
+      setItems((currentItems) => {
+        const missing = completedSnapshot.filter(
+          (item) => !currentItems.some((existing) => existing.id === item.id)
+        );
+        return missing.reduce((acc, item) => upsertItem(acc, item), currentItems);
+      });
       setErrorMessage(`Could not clear completed items: ${error.message}`);
-      return;
     }
-
-    setItems((currentItems) => currentItems.filter((item) => !item.completed));
   }
 
   async function handleGroupForShopping() {
@@ -218,6 +468,112 @@ export default function GroceriesPage() {
           .filter((item): item is GroceryItem => item !== undefined),
       }))
       .filter((section) => section.items.length > 0) ?? [];
+
+  const activeItems = items.filter((item) => !item.completed || animatingOutIds.has(item.id));
+  const completedItems = items.filter((item) => item.completed && !animatingOutIds.has(item.id));
+  const activeNames = new Set(
+    items.filter((item) => !item.completed).map((item) => normalizeItemName(item.name))
+  );
+  const suggestions =
+    isAddFocused && newItemName.trim() !== ""
+      ? getGrocerySuggestions(items, newItemName, activeNames)
+      : [];
+
+  function renderItemRow(item: GroceryItem) {
+    const isAnimatingOut = item.completed && animatingOutIds.has(item.id);
+    const isHighlighted = highlightedIds.has(item.id);
+    const isEditing = editingId === item.id;
+
+    return (
+      <li
+        key={item.id}
+        className={`flex items-center gap-1 py-0.5 transition-all duration-200 ${
+          isAnimatingOut ? "scale-[0.98] opacity-0" : "opacity-100"
+        } ${isHighlighted ? "bg-primary/10" : ""}`}
+      >
+        {isEditing ? (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              commitEdit(item);
+            }}
+            className="flex flex-1 items-center gap-1.5 py-1"
+          >
+            <input
+              autoFocus
+              type="text"
+              value={editingName}
+              onChange={(event) => setEditingName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  cancelEdit();
+                }
+              }}
+              onBlur={() => {
+                if (skipNextEditBlurRef.current) {
+                  skipNextEditBlurRef.current = false;
+                  return;
+                }
+                commitEdit(item);
+              }}
+              aria-label={`Edit ${item.name}`}
+              className="min-h-9 min-w-0 flex-1 rounded-lg border border-border bg-surface-muted px-2.5 text-[15px] text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </form>
+        ) : (
+          <>
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={item.completed}
+              onClick={() => handleToggleComplete(item)}
+              className="flex min-h-11 flex-1 items-center gap-2.5 rounded-lg px-1.5 py-1 text-left transition active:bg-surface-muted"
+            >
+              <span
+                aria-hidden
+                className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border-2 transition ${
+                  item.completed ? "border-primary bg-primary" : "border-border"
+                }`}
+              >
+                {item.completed && (
+                  <svg
+                    viewBox="0 0 12 12"
+                    className="h-2.5 w-2.5 fill-none stroke-primary-foreground"
+                    strokeWidth={2}
+                  >
+                    <path d="M2 6l2.5 2.5L10 3" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </span>
+              <span
+                className={`min-w-0 flex-1 break-words text-[15px] leading-snug ${
+                  item.completed ? "text-muted-foreground line-through" : "text-foreground"
+                }`}
+              >
+                {item.name}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => startEdit(item)}
+              aria-label={`Edit ${item.name}`}
+              className="shrink-0 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDeleteItem(item)}
+              aria-label={`Delete ${item.name}`}
+              className="shrink-0 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-danger/10 hover:text-danger focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              Delete
+            </button>
+          </>
+        )}
+      </li>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-2 sm:gap-4">
@@ -282,13 +638,16 @@ export default function GroceriesPage() {
         </>
       ) : (
         <>
-          <form onSubmit={handleAddItem} className="flex gap-2">
+          <form onSubmit={handleAddItemSubmit} className="flex gap-2">
             <input
               type="text"
               value={newItemName}
               onChange={(event) => setNewItemName(event.target.value)}
+              onFocus={() => setIsAddFocused(true)}
+              onBlur={() => setIsAddFocused(false)}
               placeholder="Add an item..."
               aria-label="New grocery item"
+              autoComplete="off"
               className="min-h-11 flex-1 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <button
@@ -299,27 +658,32 @@ export default function GroceriesPage() {
             </button>
           </form>
 
-          {!isLoading && items.length > 0 && (
-            <div className="flex items-center justify-between gap-2">
-              {items.some((item) => !item.completed) && (
+          {suggestions.length > 0 && (
+            <div className="-mt-1 flex flex-wrap gap-1.5 px-0.5">
+              {suggestions.map((suggestion) => (
                 <button
+                  key={suggestion.name}
                   type="button"
-                  onClick={handleGroupForShopping}
-                  disabled={isGrouping}
-                  className="rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground disabled:opacity-50"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => addItem(suggestion.name)}
+                  className="rounded-full border border-border bg-surface-muted px-3 py-1.5 text-sm text-foreground transition hover:bg-border active:bg-border"
                 >
-                  {isGrouping ? "Grouping…" : "Group for shopping"}
+                  {suggestion.name}
                 </button>
-              )}
-              {items.some((item) => item.completed) && (
-                <button
-                  type="button"
-                  onClick={handleClearCompleted}
-                  className="rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
-                >
-                  Clear completed
-                </button>
-              )}
+              ))}
+            </div>
+          )}
+
+          {!isLoading && items.some((item) => !item.completed) && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleGroupForShopping}
+                disabled={isGrouping}
+                className="rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground disabled:opacity-50"
+              >
+                {isGrouping ? "Grouping…" : "Group for shopping"}
+              </button>
             </div>
           )}
 
@@ -328,51 +692,63 @@ export default function GroceriesPage() {
               Loading grocery list...
             </p>
           ) : (
-            <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
-              {items.map((item) => (
-                <li
-                  key={item.id}
-                  className={`flex items-center gap-2 py-1 ${
-                    item.completed ? "bg-surface-muted" : ""
-                  }`}
-                >
-                  <label className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center">
-                    <input
-                      type="checkbox"
-                      checked={item.completed}
-                      onChange={() => handleToggleComplete(item)}
-                      aria-label={`Mark ${item.name} as complete`}
-                      className="h-[18px] w-[18px] accent-primary"
-                    />
-                  </label>
-                  <span
-                    className={`min-w-0 flex-1 break-words text-[15px] leading-snug ${
-                      item.completed
-                        ? "text-muted-foreground line-through"
-                        : "text-foreground"
-                    }`}
-                  >
-                    {item.name}
-                  </span>
+            <>
+              <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
+                {activeItems.map(renderItemRow)}
+                {activeItems.length === 0 && (
+                  <li className="px-1 py-6 text-center text-sm text-muted-foreground">
+                    {items.length === 0 ? "No items yet." : "Nothing left to buy."}
+                  </li>
+                )}
+              </ul>
+
+              {(completedItems.length > 0 || isCompletedExpanded) && (
+                <div className="flex flex-col gap-1.5">
                   <button
                     type="button"
-                    onClick={() => handleDeleteItem(item.id)}
-                    aria-label={`Delete ${item.name}`}
-                    className="shrink-0 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-danger/10 hover:text-danger focus:outline-none focus:ring-2 focus:ring-ring"
+                    onClick={() => setIsCompletedExpanded((expanded) => !expanded)}
+                    aria-expanded={isCompletedExpanded}
+                    className="flex items-center justify-between gap-2 rounded-lg px-1.5 py-2 text-left transition hover:bg-surface-muted"
                   >
-                    Delete
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Completed ({completedItems.length})
+                    </span>
+                    <span aria-hidden className="text-xs text-muted-foreground">
+                      {isCompletedExpanded ? "Hide" : "Show"}
+                    </span>
                   </button>
-                </li>
-              ))}
-              {items.length === 0 && (
-                <li className="px-1 py-6 text-center text-sm text-muted-foreground">
-                  No items yet.
-                </li>
+
+                  {isCompletedExpanded && (
+                    <>
+                      <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
+                        {completedItems.map(renderItemRow)}
+                        {completedItems.length === 0 && (
+                          <li className="px-1 py-4 text-center text-sm text-muted-foreground">
+                            Nothing completed yet.
+                          </li>
+                        )}
+                      </ul>
+                      {completedItems.length > 0 && (
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={handleClearCompleted}
+                            className="rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
+                          >
+                            Clear completed
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               )}
-            </ul>
+            </>
           )}
         </>
       )}
+
+      {toast && <Toast toast={toast} onDismiss={dismissToast} />}
     </div>
   );
 }
