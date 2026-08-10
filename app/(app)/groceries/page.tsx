@@ -24,6 +24,11 @@ const INFO_TOAST_MS = 2500;
 // long enough to read as intentional, short enough to never feel like a wait.
 const COMPLETE_ANIM_MS = 180;
 const HIGHLIGHT_MS = 2000;
+// How long to wait after items change before re-asking the AI to group any
+// newly-arrived/uncategorized items — batches rapid adds into one call
+// instead of re-grouping on every keystroke-speed mutation.
+const CATEGORIZE_DEBOUNCE_MS = 1200;
+const UNSORTED_SECTION = "Unsorted";
 
 export default function GroceriesPage() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -34,10 +39,12 @@ export default function GroceriesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [groupedSections, setGroupedSections] = useState<
-    { name: string; itemIds: string[] }[] | null
-  >(null);
-  const [isGrouping, setIsGrouping] = useState(false);
+  // Shopping Mode is a different *view* of the same items — it never copies
+  // or replaces them. categoryByItemId is AI-provided organization metadata
+  // keyed by the real item id; items missing an entry just render in the
+  // Unsorted bucket until categorization catches up.
+  const [isShoppingMode, setIsShoppingMode] = useState(false);
+  const [categoryByItemId, setCategoryByItemId] = useState<Record<string, string>>({});
 
   const [isCompletedExpanded, setIsCompletedExpanded] = useState(false);
   const [animatingOutIds, setAnimatingOutIds] = useState<Set<string>>(new Set());
@@ -59,6 +66,7 @@ export default function GroceriesPage() {
   // Committing/cancelling an edit unmounts its input, which can synthesize a
   // trailing blur event — this flag stops that blur from re-committing.
   const skipNextEditBlurRef = useRef(false);
+  const isCategorizingRef = useRef(false);
 
   // The authenticated layout already guarantees a session exists before this
   // page renders; read it locally so the data effects below can keep their
@@ -412,9 +420,21 @@ export default function GroceriesPage() {
     }
   }
 
-  async function handleGroupForShopping() {
-    setErrorMessage(null);
-    setIsGrouping(true);
+  // Asks the AI to group the currently-active items into store sections and
+  // merges the result into categoryByItemId — organization metadata for the
+  // existing items, never a replacement list. Safe to call repeatedly; it
+  // no-ops while a request is already in flight.
+  async function runCategorization() {
+    if (isCategorizingRef.current) {
+      return;
+    }
+
+    const activeNow = items.filter((item) => !item.completed);
+    if (activeNow.length === 0) {
+      return;
+    }
+
+    isCategorizingRef.current = true;
 
     try {
       const {
@@ -422,11 +442,8 @@ export default function GroceriesPage() {
       } = await supabase.auth.getSession();
 
       if (!session) {
-        setErrorMessage("Could not group items: you're signed out.");
         return;
       }
-
-      const incompleteItems = items.filter((item) => !item.completed);
 
       const response = await fetch("/api/group-groceries", {
         method: "POST",
@@ -435,39 +452,60 @@ export default function GroceriesPage() {
           Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          items: incompleteItems.map((item) => ({ id: item.id, name: item.name })),
+          items: activeNow.map((item) => ({ id: item.id, name: item.name })),
         }),
       });
 
       const body = await response.json();
-
       if (!response.ok) {
-        setErrorMessage(`Could not group items: ${body.error ?? "Unknown error"}`);
         return;
       }
 
-      setGroupedSections(body.sections);
+      const nextCategories: Record<string, string> = {};
+      for (const section of body.sections as { name: string; itemIds: string[] }[]) {
+        for (const id of section.itemIds) {
+          nextCategories[id] = section.name;
+        }
+      }
+      setCategoryByItemId((current) => ({ ...current, ...nextCategories }));
     } catch {
-      setErrorMessage("Could not group items: network error.");
+      // Best-effort — Shopping Mode stays usable with whatever grouping it
+      // already has; uncategorized items just sit in Unsorted for now.
     } finally {
-      setIsGrouping(false);
+      isCategorizingRef.current = false;
     }
   }
 
-  function handleBackToList() {
-    setGroupedSections(null);
+  function handleStartShopping() {
+    setErrorMessage(null);
+    setIsShoppingMode(true);
+    runCategorization();
   }
 
-  const itemsById = new Map(items.map((item) => [item.id, item]));
-  const displaySections =
-    groupedSections
-      ?.map((section) => ({
-        name: section.name,
-        items: section.itemIds
-          .map((id) => itemsById.get(id))
-          .filter((item): item is GroceryItem => item !== undefined),
-      }))
-      .filter((section) => section.items.length > 0) ?? [];
+  function handleExitShopping() {
+    setIsShoppingMode(false);
+  }
+
+  // While shopping, pick up categories for items that arrived after the last
+  // AI pass (new adds, realtime inserts) without blocking or re-running on
+  // every keystroke — debounced and skipped once everything active has a
+  // category.
+  useEffect(() => {
+    if (!isShoppingMode) {
+      return;
+    }
+    const hasUncategorized = items.some((item) => !item.completed && !categoryByItemId[item.id]);
+    if (!hasUncategorized) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      runCategorization();
+    }, CATEGORIZE_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isShoppingMode, items, categoryByItemId]);
 
   const activeItems = items.filter((item) => !item.completed || animatingOutIds.has(item.id));
   const completedItems = items.filter((item) => item.completed && !animatingOutIds.has(item.id));
@@ -478,6 +516,38 @@ export default function GroceriesPage() {
     isAddFocused && newItemName.trim() !== ""
       ? getGrocerySuggestions(items, newItemName, activeNames)
       : [];
+
+  // Ticks down the instant an item is tapped, even during its brief fade —
+  // completion should feel immediate, independent of the fade-out animation.
+  const remainingCount = items.filter((item) => !item.completed).length;
+
+  // Groups the SAME active items by AI category — presentation only. Section
+  // order follows each category's first active item in list order, which
+  // stays stable across re-categorizations instead of jumping around; empty
+  // categories (last item completed) simply disappear since they're derived
+  // fresh from activeItems every render.
+  const shoppingSections = (() => {
+    const buckets = new Map<string, GroceryItem[]>();
+    const order: string[] = [];
+
+    for (const item of activeItems) {
+      const category = categoryByItemId[item.id] || UNSORTED_SECTION;
+      if (!buckets.has(category)) {
+        buckets.set(category, []);
+        if (category !== UNSORTED_SECTION) {
+          order.push(category);
+        }
+      }
+      buckets.get(category)!.push(item);
+    }
+
+    const sections = order.map((name) => ({ name, items: buckets.get(name)! }));
+    const unsorted = buckets.get(UNSORTED_SECTION);
+    if (unsorted && unsorted.length > 0) {
+      sections.push({ name: UNSORTED_SECTION, items: unsorted });
+    }
+    return sections;
+  })();
 
   function renderItemRow(item: GroceryItem) {
     const isAnimatingOut = item.completed && animatingOutIds.has(item.id);
@@ -575,6 +645,101 @@ export default function GroceriesPage() {
     );
   }
 
+  // Shared between Normal and Shopping Mode — same state, same handlers,
+  // just rendered in both places so "Add an item while shopping" never
+  // becomes a second implementation.
+  function renderAddItemForm() {
+    return (
+      <>
+        <form onSubmit={handleAddItemSubmit} className="flex gap-2">
+          <input
+            type="text"
+            value={newItemName}
+            onChange={(event) => setNewItemName(event.target.value)}
+            onFocus={() => setIsAddFocused(true)}
+            onBlur={() => setIsAddFocused(false)}
+            placeholder="Add an item..."
+            aria-label="New grocery item"
+            autoComplete="off"
+            className="min-h-11 flex-1 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <button
+            type="submit"
+            className="min-h-11 shrink-0 rounded-xl bg-primary px-4 text-base font-medium text-primary-foreground transition hover:bg-primary/90 active:bg-primary/80"
+          >
+            Add
+          </button>
+        </form>
+
+        {suggestions.length > 0 && (
+          <div className="-mt-1 flex flex-wrap gap-1.5 px-0.5">
+            {suggestions.map((suggestion) => (
+              <button
+                key={suggestion.name}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => addItem(suggestion.name)}
+                className="rounded-full border border-border bg-surface-muted px-3 py-1.5 text-sm text-foreground transition hover:bg-border active:bg-border"
+              >
+                {suggestion.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // Also shared between the two views — same completedItems, same
+  // renderItemRow, same expand/restore/clear behavior either way.
+  function renderCompletedSection() {
+    if (completedItems.length === 0 && !isCompletedExpanded) {
+      return null;
+    }
+
+    return (
+      <div className="flex flex-col gap-1.5">
+        <button
+          type="button"
+          onClick={() => setIsCompletedExpanded((expanded) => !expanded)}
+          aria-expanded={isCompletedExpanded}
+          className="flex items-center justify-between gap-2 rounded-lg px-1.5 py-2 text-left transition hover:bg-surface-muted"
+        >
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Completed ({completedItems.length})
+          </span>
+          <span aria-hidden className="text-xs text-muted-foreground">
+            {isCompletedExpanded ? "Hide" : "Show"}
+          </span>
+        </button>
+
+        {isCompletedExpanded && (
+          <>
+            <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
+              {completedItems.map(renderItemRow)}
+              {completedItems.length === 0 && (
+                <li className="px-1 py-4 text-center text-sm text-muted-foreground">
+                  Nothing completed yet.
+                </li>
+              )}
+            </ul>
+            {completedItems.length > 0 && (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleClearCompleted}
+                  className="rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
+                >
+                  Clear completed
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-2 sm:gap-4">
       <div className="flex items-center gap-2">
@@ -584,10 +749,31 @@ export default function GroceriesPage() {
         >
           &lsaquo; Home
         </Link>
-        <h1 className="flex items-center gap-1.5 text-xl font-bold tracking-tight text-primary">
-          <LeafIcon className="h-4 w-4 shrink-0" />
-          Grocery List
-        </h1>
+        {isShoppingMode ? (
+          <div className="flex flex-1 items-center justify-between gap-2">
+            <h1 className="flex items-center gap-1.5 text-xl font-bold tracking-tight text-primary">
+              <LeafIcon className="h-4 w-4 shrink-0" />
+              Shopping
+            </h1>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-muted-foreground">
+                {remainingCount} left
+              </span>
+              <button
+                type="button"
+                onClick={handleExitShopping}
+                className="shrink-0 rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        ) : (
+          <h1 className="flex items-center gap-1.5 text-xl font-bold tracking-tight text-primary">
+            <LeafIcon className="h-4 w-4 shrink-0" />
+            Grocery List
+          </h1>
+        )}
       </div>
 
       {errorMessage && (
@@ -596,155 +782,60 @@ export default function GroceriesPage() {
         </p>
       )}
 
-      {groupedSections ? (
+      {isLoading ? (
+        <p className="p-1 text-sm text-muted-foreground">
+          Loading grocery list...
+        </p>
+      ) : isShoppingMode ? (
         <>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-primary">
-              Grouped for shopping
-            </span>
-            <button
-              type="button"
-              onClick={handleBackToList}
-              className="shrink-0 rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
-            >
-              Back to list
-            </button>
-          </div>
+          {renderAddItemForm()}
 
           <div className="flex flex-col gap-3">
-            {displaySections.map((section, index) => (
-              <div key={`${section.name}-${index}`}>
+            {shoppingSections.map((section) => (
+              <div key={section.name}>
                 <h2 className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {section.name}
                 </h2>
                 <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
-                  {section.items.map((item) => (
-                    <li
-                      key={item.id}
-                      className="px-2 py-1.5 text-[15px] leading-snug text-foreground"
-                    >
-                      {item.name}
-                    </li>
-                  ))}
+                  {section.items.map(renderItemRow)}
                 </ul>
               </div>
             ))}
-            {displaySections.length === 0 && (
+            {shoppingSections.length === 0 && (
               <p className="px-1 py-6 text-center text-sm text-muted-foreground">
-                Nothing to show.
+                Nothing left to buy.
               </p>
             )}
           </div>
+
+          {renderCompletedSection()}
         </>
       ) : (
         <>
-          <form onSubmit={handleAddItemSubmit} className="flex gap-2">
-            <input
-              type="text"
-              value={newItemName}
-              onChange={(event) => setNewItemName(event.target.value)}
-              onFocus={() => setIsAddFocused(true)}
-              onBlur={() => setIsAddFocused(false)}
-              placeholder="Add an item..."
-              aria-label="New grocery item"
-              autoComplete="off"
-              className="min-h-11 flex-1 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-            <button
-              type="submit"
-              className="min-h-11 shrink-0 rounded-xl bg-primary px-4 text-base font-medium text-primary-foreground transition hover:bg-primary/90 active:bg-primary/80"
-            >
-              Add
-            </button>
-          </form>
+          {renderAddItemForm()}
 
-          {suggestions.length > 0 && (
-            <div className="-mt-1 flex flex-wrap gap-1.5 px-0.5">
-              {suggestions.map((suggestion) => (
-                <button
-                  key={suggestion.name}
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => addItem(suggestion.name)}
-                  className="rounded-full border border-border bg-surface-muted px-3 py-1.5 text-sm text-foreground transition hover:bg-border active:bg-border"
-                >
-                  {suggestion.name}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {!isLoading && items.some((item) => !item.completed) && (
+          {items.some((item) => !item.completed) && (
             <div className="flex justify-end">
               <button
                 type="button"
-                onClick={handleGroupForShopping}
-                disabled={isGrouping}
-                className="rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground disabled:opacity-50"
+                onClick={handleStartShopping}
+                className="rounded-full bg-surface-muted px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-border"
               >
-                {isGrouping ? "Grouping…" : "Group for shopping"}
+                Start Shopping
               </button>
             </div>
           )}
 
-          {isLoading ? (
-            <p className="p-1 text-sm text-muted-foreground">
-              Loading grocery list...
-            </p>
-          ) : (
-            <>
-              <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
-                {activeItems.map(renderItemRow)}
-                {activeItems.length === 0 && (
-                  <li className="px-1 py-6 text-center text-sm text-muted-foreground">
-                    {items.length === 0 ? "No items yet." : "Nothing left to buy."}
-                  </li>
-                )}
-              </ul>
+          <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
+            {activeItems.map(renderItemRow)}
+            {activeItems.length === 0 && (
+              <li className="px-1 py-6 text-center text-sm text-muted-foreground">
+                {items.length === 0 ? "No items yet." : "Nothing left to buy."}
+              </li>
+            )}
+          </ul>
 
-              {(completedItems.length > 0 || isCompletedExpanded) && (
-                <div className="flex flex-col gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setIsCompletedExpanded((expanded) => !expanded)}
-                    aria-expanded={isCompletedExpanded}
-                    className="flex items-center justify-between gap-2 rounded-lg px-1.5 py-2 text-left transition hover:bg-surface-muted"
-                  >
-                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Completed ({completedItems.length})
-                    </span>
-                    <span aria-hidden className="text-xs text-muted-foreground">
-                      {isCompletedExpanded ? "Hide" : "Show"}
-                    </span>
-                  </button>
-
-                  {isCompletedExpanded && (
-                    <>
-                      <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
-                        {completedItems.map(renderItemRow)}
-                        {completedItems.length === 0 && (
-                          <li className="px-1 py-4 text-center text-sm text-muted-foreground">
-                            Nothing completed yet.
-                          </li>
-                        )}
-                      </ul>
-                      {completedItems.length > 0 && (
-                        <div className="flex justify-end">
-                          <button
-                            type="button"
-                            onClick={handleClearCompleted}
-                            className="rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
-                          >
-                            Clear completed
-                          </button>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </>
-          )}
+          {renderCompletedSection()}
         </>
       )}
 
