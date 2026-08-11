@@ -624,8 +624,8 @@ export default function GroceriesPage() {
             >
               <span
                 aria-hidden
-                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border-2 transition ${
-                  item.completed ? "border-primary bg-primary" : "border-border"
+                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition ${
+                  item.completed ? "border-primary bg-primary" : "border-border/80"
                 }`}
               >
                 {item.completed && (
