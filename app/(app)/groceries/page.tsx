@@ -429,6 +429,17 @@ export default function GroceriesPage() {
   // merges the result into categoryByItemId — organization metadata for the
   // existing items, never a replacement list. Safe to call repeatedly; it
   // no-ops while a request is already in flight.
+  //
+  // Two independent triggers can call this: handleStartShopping's direct
+  // call (on entry) and the debounced background effect below (for items
+  // that arrive later). Only one of them will actually pass the
+  // isCategorizingRef mutex and do the work at a given time — so
+  // isInitialCategorizing is cleared here, inside the call that actually
+  // ran, rather than by whichever caller happened to invoke it. Tying it to
+  // an external .finally() on one specific caller's promise was the bug:
+  // that promise could resolve (mutex-skip, or a failed request) without
+  // the other, still-in-flight/retrying call ever being tracked, leaving
+  // the loading screen cleared before real grouping had actually landed.
   async function runCategorization() {
     if (isCategorizingRef.current) {
       return;
@@ -436,6 +447,7 @@ export default function GroceriesPage() {
 
     const activeNow = items.filter((item) => !item.completed);
     if (activeNow.length === 0) {
+      setIsInitialCategorizing(false);
       return;
     }
 
@@ -463,6 +475,7 @@ export default function GroceriesPage() {
 
       const body = await response.json();
       if (!response.ok) {
+        console.error("Grouping request failed:", body?.error ?? response.status);
         return;
       }
 
@@ -473,11 +486,13 @@ export default function GroceriesPage() {
         }
       }
       setCategoryByItemId((current) => ({ ...current, ...nextCategories }));
-    } catch {
+    } catch (err) {
       // Best-effort — Shopping Mode stays usable with whatever grouping it
       // already has; uncategorized items just sit in Unsorted for now.
+      console.error("Grouping request threw:", err);
     } finally {
       isCategorizingRef.current = false;
+      setIsInitialCategorizing(false);
     }
   }
 
@@ -485,7 +500,7 @@ export default function GroceriesPage() {
     setErrorMessage(null);
     setIsShoppingMode(true);
     setIsInitialCategorizing(true);
-    runCategorization().finally(() => setIsInitialCategorizing(false));
+    runCategorization();
   }
 
   function handleExitShopping() {
