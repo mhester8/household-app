@@ -91,6 +91,28 @@ The app needs to support multiple households, sharing beyond these two people, o
 
 ---
 
+## 005 - Workout tracker: per-user data, snapshot sessions, one active session
+
+**Date:** 2026-08-11
+
+**Status:** Active
+
+### Decision
+Workout templates and sessions belong to the individual signed-in user (`user_id`, RLS-scoped), unlike the shared grocery list. A workout session copies (snapshots) its exercises' name/sets/rest from the template at start time into `session_exercises`, rather than referencing `template_exercises` directly, so later template edits/deletes never corrupt past session history. A database-level unique index allows at most one incomplete (`completed_at IS NULL`) session per user at a time; starting a new workout while one is already in progress resumes it instead of creating a second one.
+
+### Why
+A workout log is normally personal even within a two-person household, so shared/no-ownership (as used for groceries) doesn't fit. Snapshotting is the minimum needed to keep "record what actually happened" durable without a generalized exercise-library data model. A single active session keeps the UI (and the data) simple for this first slice — no session picker, no merge/cleanup logic for abandoned duplicates.
+
+### Alternatives considered
+- Shared workout data across both accounts, matching decision 004.
+- Sessions referencing `template_exercises` directly instead of snapshotting.
+- Allowing multiple simultaneous in-progress sessions per user.
+
+### Revisit when
+The household wants to see or compare each other's workouts, templates need an edit/versioning UI, or real usage shows a need for multiple concurrent sessions (e.g. supersetting two templates).
+
+---
+
 ## Maintenance Guidelines
 
 - Record only meaningful product or architectural decisions.
