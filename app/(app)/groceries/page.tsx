@@ -11,6 +11,7 @@ import {
   upsertItem,
 } from "@/lib/groceryItems";
 import { LeafIcon } from "@/components/LeafIcon";
+import { ItemActionsMenu } from "@/components/ItemActionsMenu";
 import { Toast, type ToastState } from "@/components/Toast";
 
 // How long an undo/error toast stays up before it auto-dismisses. Delete's
@@ -618,19 +619,20 @@ export default function GroceriesPage() {
               role="checkbox"
               aria-checked={item.completed}
               onClick={() => handleToggleComplete(item)}
-              className="flex min-h-11 flex-1 items-center gap-2.5 rounded-lg px-1.5 py-1 text-left transition active:bg-surface-muted"
+              onTouchStart={() => {}}
+              className="flex min-h-11 flex-1 cursor-pointer items-center gap-2.5 rounded-lg px-1.5 py-1 text-left transition hover:bg-surface-muted/70 active:scale-[0.99] active:bg-surface-muted focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <span
                 aria-hidden
-                className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border-2 transition ${
+                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border-2 transition ${
                   item.completed ? "border-primary bg-primary" : "border-border"
                 }`}
               >
                 {item.completed && (
                   <svg
                     viewBox="0 0 12 12"
-                    className="h-2.5 w-2.5 fill-none stroke-primary-foreground"
-                    strokeWidth={2}
+                    className="h-3 w-3 fill-none stroke-primary-foreground"
+                    strokeWidth={2.25}
                   >
                     <path d="M2 6l2.5 2.5L10 3" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
@@ -644,22 +646,11 @@ export default function GroceriesPage() {
                 {item.name}
               </span>
             </button>
-            <button
-              type="button"
-              onClick={() => startEdit(item)}
-              aria-label={`Edit ${item.name}`}
-              className="shrink-0 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              Edit
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDeleteItem(item)}
-              aria-label={`Delete ${item.name}`}
-              className="shrink-0 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-danger/10 hover:text-danger focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              Delete
-            </button>
+            <ItemActionsMenu
+              itemName={item.name}
+              onEdit={() => startEdit(item)}
+              onDelete={() => handleDeleteItem(item)}
+            />
           </>
         )}
       </li>
@@ -796,7 +787,7 @@ export default function GroceriesPage() {
               Shopping
             </h1>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-muted-foreground">
+              <span className="text-sm font-semibold text-foreground">
                 {remainingCount} left
               </span>
               <button
@@ -836,7 +827,7 @@ export default function GroceriesPage() {
             <div className="flex flex-col gap-3">
               {shoppingSections.map((section) => (
                 <div key={section.name}>
-                  <h2 className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <h2 className="px-1 pb-1.5 pt-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                     {section.name}
                   </h2>
                   <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
