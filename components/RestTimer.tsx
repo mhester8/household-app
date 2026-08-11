@@ -3,6 +3,62 @@
 import { useEffect, useRef, useState } from "react";
 import { formatDuration } from "@/lib/workouts";
 
+// Shared across rest periods — RestTimer unmounts between them, and reusing
+// one AudioContext instead of creating a fresh one each time avoids running
+// into the browser's cap on how many can exist at once over a long workout.
+let sharedAudioContext: AudioContext | null = null;
+
+function getAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const Ctor =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctor) {
+    return null;
+  }
+  if (!sharedAudioContext) {
+    sharedAudioContext = new Ctor();
+  }
+  return sharedAudioContext;
+}
+
+// A single short, quiet chime (a quick rising tone, ~300ms) synthesized with
+// the Web Audio API — no audio file/dependency to ship. Never loops, so it
+// can't turn into an alarm. Autoplay/permission restrictions are expected:
+// if resume() or playback is blocked, this just no-ops rather than throwing,
+// since the workout itself never depends on sound.
+function playRestCompleteChime() {
+  const ctx = getAudioContext();
+  if (!ctx) {
+    return;
+  }
+
+  Promise.resolve(ctx.state === "suspended" ? ctx.resume() : undefined)
+    .then(() => {
+      const now = ctx.currentTime;
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(660, now);
+      oscillator.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.15, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start(now);
+      oscillator.stop(now + 0.3);
+    })
+    .catch(() => {
+      // Blocked by autoplay/permission restrictions — skip silently.
+    });
+}
+
 // Timestamp-based on purpose: remaining time is recomputed from the wall
 // clock every tick rather than decremented, so backgrounding the tab,
 // locking the phone, timer throttling, or refreshing the page never makes
@@ -44,12 +100,21 @@ export function RestTimer({
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, []);
 
+  // A rest period only ever starts right after a Complete Set tap, so this
+  // mount is as close as this component ever gets to that user gesture —
+  // resuming here (rather than waiting until the chime actually fires,
+  // possibly minutes later) gives the browser its best chance to allow audio.
+  useEffect(() => {
+    getAudioContext()?.resume().catch(() => {});
+  }, []);
+
   const remainingSeconds = (targetMs - nowMs) / 1000;
   const isDone = remainingSeconds <= 0;
 
   useEffect(() => {
     if (isDone && !hasAutoAdvancedRef.current) {
       hasAutoAdvancedRef.current = true;
+      playRestCompleteChime();
       onAdvance();
     }
   }, [isDone, onAdvance]);

@@ -318,40 +318,36 @@ export default function WorkoutsPage() {
         <>
           {renderActiveSessionArea()}
 
-          <Link
-            href="/workouts/new"
-            className="min-h-11 flex items-center justify-center rounded-xl bg-primary px-4 text-base font-medium text-primary-foreground transition hover:bg-primary/90 active:bg-primary/80"
-          >
-            + New Template
-          </Link>
-
-          <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
+          <ul className="flex flex-col gap-2">
             {templates.map((template) => (
-              <li key={template.id} className="flex items-center justify-between gap-2 px-1.5 py-2">
-                <div className="flex min-w-0 flex-col gap-0.5 px-1">
-                  <span className="truncate text-[15px] font-medium uppercase text-foreground">
-                    {template.name}
-                  </span>
-                  <span className="text-sm text-muted-foreground">
-                    {template.exerciseCount} exercise{template.exerciseCount === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <div className="flex shrink-0 gap-2">
+              <li
+                key={template.id}
+                className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-3.5 sm:p-4"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <span className="truncate text-base font-semibold uppercase text-foreground">
+                      {template.name}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      {template.exerciseCount} exercise{template.exerciseCount === 1 ? "" : "s"}
+                    </span>
+                  </div>
                   <Link
                     href={`/workouts/${template.id}/edit`}
-                    className="flex min-h-11 items-center rounded-xl px-3 text-sm font-semibold text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
+                    className="shrink-0 rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
                   >
                     Edit
                   </Link>
-                  <button
-                    type="button"
-                    onClick={() => handleStart(template)}
-                    disabled={startingTemplateId !== null}
-                    className="min-h-11 rounded-xl bg-surface-muted px-4 text-sm font-semibold text-primary transition hover:bg-border disabled:opacity-50"
-                  >
-                    {startingTemplateId === template.id ? "Starting..." : "Start"}
-                  </button>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => handleStart(template)}
+                  disabled={startingTemplateId !== null}
+                  className="min-h-12 w-full rounded-xl bg-primary px-4 text-base font-semibold text-primary-foreground transition hover:bg-primary/90 active:bg-primary/80 disabled:opacity-50"
+                >
+                  {startingTemplateId === template.id ? "Starting..." : "Start Workout"}
+                </button>
               </li>
             ))}
             {templates.length === 0 && (
@@ -360,6 +356,13 @@ export default function WorkoutsPage() {
               </li>
             )}
           </ul>
+
+          <Link
+            href="/workouts/new"
+            className="flex min-h-11 items-center justify-center rounded-xl border border-dashed border-border px-4 text-sm font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
+          >
+            + New Template
+          </Link>
         </>
       )}
     </div>

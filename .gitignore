@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+.claude/local-testing.md
 
 # next.js
 /.next/

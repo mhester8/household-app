@@ -54,7 +54,8 @@ export default function HomePage() {
         description="Shared shopping list"
       />
       <FeatureCard title="Notes & To-Dos" description="Coming soon" />
-      <FeatureCard href="/workouts" title="Workout Tracker" description="Templates & sessions" />
+      <FeatureCard href="/workouts" title="Workouts" description="Templates & sessions" />
+      <FeatureCard href="/recipes" title="Recipes" description="Saved recipe library" />
     </div>
   );
 }
