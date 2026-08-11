@@ -575,6 +575,38 @@ export default function GroceriesPage() {
     const isAnimatingOut = item.completed && animatingOutIds.has(item.id);
     const isHighlighted = highlightedIds.has(item.id);
     const isEditing = editingId === item.id;
+    // Completing an item is a Shopping Mode action — the normal list is for
+    // planning/editing what's needed, not marking things as bought. Outside
+    // Shopping Mode the row is a static label, not a checkbox.
+    const canToggleComplete = isShoppingMode;
+
+    const rowIndicatorAndName = (
+      <>
+        <span
+          aria-hidden
+          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition ${
+            item.completed ? "border-primary bg-primary" : "border-border/80"
+          }`}
+        >
+          {item.completed && (
+            <svg
+              viewBox="0 0 12 12"
+              className="h-3 w-3 fill-none stroke-primary-foreground"
+              strokeWidth={2.25}
+            >
+              <path d="M2 6l2.5 2.5L10 3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </span>
+        <span
+          className={`min-w-0 flex-1 break-words text-[15px] leading-snug ${
+            item.completed ? "text-muted-foreground line-through" : "text-foreground"
+          }`}
+        >
+          {item.name}
+        </span>
+      </>
+    );
 
     return (
       <li
@@ -614,38 +646,22 @@ export default function GroceriesPage() {
           </form>
         ) : (
           <>
-            <button
-              type="button"
-              role="checkbox"
-              aria-checked={item.completed}
-              onClick={() => handleToggleComplete(item)}
-              onTouchStart={() => {}}
-              className="flex min-h-11 flex-1 cursor-pointer items-center gap-2.5 rounded-lg px-1.5 py-1 text-left transition hover:bg-surface-muted/70 active:scale-[0.99] active:bg-surface-muted focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <span
-                aria-hidden
-                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition ${
-                  item.completed ? "border-primary bg-primary" : "border-border/80"
-                }`}
+            {canToggleComplete ? (
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={item.completed}
+                onClick={() => handleToggleComplete(item)}
+                onTouchStart={() => {}}
+                className="flex min-h-11 flex-1 cursor-pointer items-center gap-2.5 rounded-lg px-1.5 py-1 text-left transition hover:bg-surface-muted/70 active:scale-[0.99] active:bg-surface-muted focus:outline-none focus:ring-2 focus:ring-ring"
               >
-                {item.completed && (
-                  <svg
-                    viewBox="0 0 12 12"
-                    className="h-3 w-3 fill-none stroke-primary-foreground"
-                    strokeWidth={2.25}
-                  >
-                    <path d="M2 6l2.5 2.5L10 3" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                )}
-              </span>
-              <span
-                className={`min-w-0 flex-1 break-words text-[15px] leading-snug ${
-                  item.completed ? "text-muted-foreground line-through" : "text-foreground"
-                }`}
-              >
-                {item.name}
-              </span>
-            </button>
+                {rowIndicatorAndName}
+              </button>
+            ) : (
+              <div className="flex min-h-11 flex-1 items-center gap-2.5 rounded-lg px-1.5 py-1 text-left">
+                {rowIndicatorAndName}
+              </div>
+            )}
             <ItemActionsMenu
               itemName={item.name}
               onEdit={() => startEdit(item)}
