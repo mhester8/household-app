@@ -69,11 +69,18 @@ export function ItemActionsMenu({
   }
 
   // Tabbing out of the menu to unrelated UI should close it, same as a
-  // native <select> — no explicit focus trap needed.
-  function handleBlur(event: React.FocusEvent<HTMLDivElement>) {
-    if (!event.currentTarget.contains(event.relatedTarget as Node)) {
-      setIsOpen(false);
-    }
+  // native <select> — no explicit focus trap needed. Deferred (rather than
+  // reading event.relatedTarget synchronously) because touch-driven blur on
+  // mobile fires before the tapped item's own click event, and its
+  // relatedTarget is unreliably null there — closing synchronously would
+  // unmount Edit/Delete before the tap ever reached them. By the time this
+  // runs, any click from the tap that caused the blur has already fired.
+  function handleBlur() {
+    window.setTimeout(() => {
+      if (!containerRef.current?.contains(document.activeElement)) {
+        setIsOpen(false);
+      }
+    }, 0);
   }
 
   return (
