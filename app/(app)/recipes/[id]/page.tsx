@@ -55,7 +55,7 @@ export default function RecipeDetailPage() {
       const [recipeResult, ingredientsResult, stepsResult] = await Promise.all([
         supabase
           .from("recipes")
-          .select("id, title, source_url, notes, created_at")
+          .select("id, title, source_url, notes, servings, created_at")
           .eq("id", recipeId)
           .maybeSingle(),
         supabase.from("recipe_ingredients").select("id, recipe_id, position, text").eq("recipe_id", recipeId),
@@ -363,6 +363,10 @@ export default function RecipeDetailPage() {
               </Link>
             </div>
           </div>
+
+          {recipe.servings && (
+            <p className="text-sm text-muted-foreground">Servings: {recipe.servings}</p>
+          )}
 
           {recipe.source_url && (
             <a

@@ -5,6 +5,7 @@ export type Recipe = {
   title: string;
   source_url: string | null;
   notes: string | null;
+  servings: string | null;
   created_at: string;
 };
 
@@ -54,17 +55,26 @@ export type RecipeSaveInput = {
   title: string;
   sourceUrl: string | null;
   notes: string | null;
+  servings: string | null;
   ingredients: string[];
   steps: string[];
 };
 
-// Shape returned by POST /api/import-recipe — a review-only draft, not yet
-// saved. `warnings` is for the review UI only and is never persisted.
+// Shape returned by POST /api/import-recipe and /api/import-recipe-url — a
+// review-only draft, not yet saved. `warnings` is for the review UI only
+// and is never persisted. `sourceUrl` is only set by the URL importer (the
+// final URL actually fetched, after redirects) so the review form can
+// prefill the existing Source URL field; the photo importer leaves it
+// undefined. `servings` preserves the source's stated yield wording (e.g.
+// "Serves 6") rather than forcing it into a number — null when absent or
+// not confidently readable.
 export type RecipeImportDraft = {
   title: string | null;
   ingredients: string[];
   steps: string[];
   warnings: string[];
+  sourceUrl?: string;
+  servings: string | null;
 };
 
 async function insertChildren(recipeId: string, input: RecipeSaveInput): Promise<string | null> {
@@ -97,7 +107,7 @@ export async function createRecipe(
 ): Promise<{ id: string; error: null } | { id: null; error: string }> {
   const { data: recipe, error: recipeError } = await supabase
     .from("recipes")
-    .insert({ title: input.title, source_url: input.sourceUrl, notes: input.notes })
+    .insert({ title: input.title, source_url: input.sourceUrl, notes: input.notes, servings: input.servings })
     .select("id")
     .single();
 

@@ -34,6 +34,7 @@ export function RecipeForm({
   initialTitle,
   initialSourceUrl,
   initialNotes,
+  initialServings,
   initialIngredients,
   initialSteps,
   saveLabel,
@@ -43,6 +44,7 @@ export function RecipeForm({
   initialTitle: string;
   initialSourceUrl: string;
   initialNotes: string;
+  initialServings: string;
   initialIngredients: RecipeDraftLine[];
   initialSteps: RecipeDraftLine[];
   saveLabel: string;
@@ -58,6 +60,7 @@ export function RecipeForm({
   const [title, setTitle] = useState(initialTitle);
   const [sourceUrl, setSourceUrl] = useState(initialSourceUrl);
   const [notes, setNotes] = useState(initialNotes);
+  const [servings, setServings] = useState(initialServings);
   const [ingredients, setIngredients] = useState<RecipeDraftLine[]>(initialIngredients);
   const [steps, setSteps] = useState<RecipeDraftLine[]>(initialSteps);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -86,6 +89,7 @@ export function RecipeForm({
     const trimmedTitle = title.trim();
     const trimmedSourceUrl = sourceUrl.trim();
     const trimmedNotes = notes.trim();
+    const trimmedServings = servings.trim();
     const trimmedIngredients = ingredients.map((line) => line.text.trim()).filter((text) => text !== "");
     const trimmedSteps = steps.map((line) => line.text.trim()).filter((text) => text !== "");
 
@@ -100,6 +104,7 @@ export function RecipeForm({
       title: trimmedTitle,
       sourceUrl: trimmedSourceUrl === "" ? null : trimmedSourceUrl,
       notes: trimmedNotes === "" ? null : trimmedNotes,
+      servings: trimmedServings === "" ? null : trimmedServings,
       ingredients: trimmedIngredients,
       steps: trimmedSteps,
     });
@@ -132,6 +137,16 @@ export function RecipeForm({
           onChange={(event) => setTitle(event.target.value)}
           placeholder="Recipe title"
           aria-label="Recipe title"
+          autoComplete="off"
+          className="min-h-11 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+
+        <input
+          type="text"
+          value={servings}
+          onChange={(event) => setServings(event.target.value)}
+          placeholder="Servings / Yield (optional, e.g. Serves 6)"
+          aria-label="Servings / Yield"
           autoComplete="off"
           className="min-h-11 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />

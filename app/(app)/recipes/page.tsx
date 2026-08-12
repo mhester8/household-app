@@ -5,7 +5,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import { sortRecipesByCreatedAt, type Recipe } from "@/lib/recipes";
 
-type RecipeWithCount = Recipe & { ingredientCount: number };
+type RecipeWithCount = Recipe & { ingredientCount: number; ingredientTexts: string[] };
 
 export default function RecipesPage() {
   const [recipes, setRecipes] = useState<RecipeWithCount[]>([]);
@@ -13,6 +13,7 @@ export default function RecipesPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [thisWeekCount, setThisWeekCount] = useState(0);
   const [isChoosingRecipeType, setIsChoosingRecipeType] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     async function loadRecipes() {
@@ -22,9 +23,9 @@ export default function RecipesPage() {
       const [recipesResult, ingredientsResult] = await Promise.all([
         supabase
           .from("recipes")
-          .select("id, title, source_url, notes, created_at")
+          .select("id, title, source_url, notes, servings, created_at")
           .order("created_at", { ascending: true }),
-        supabase.from("recipe_ingredients").select("recipe_id"),
+        supabase.from("recipe_ingredients").select("recipe_id, text"),
       ]);
 
       if (recipesResult.error || ingredientsResult.error) {
@@ -37,16 +38,18 @@ export default function RecipesPage() {
         return;
       }
 
-      const countByRecipeId = new Map<string, number>();
+      const textsByRecipeId = new Map<string, string[]>();
       for (const row of ingredientsResult.data ?? []) {
-        countByRecipeId.set(row.recipe_id, (countByRecipeId.get(row.recipe_id) ?? 0) + 1);
+        const texts = textsByRecipeId.get(row.recipe_id) ?? [];
+        texts.push(row.text);
+        textsByRecipeId.set(row.recipe_id, texts);
       }
 
       setRecipes(
-        (recipesResult.data ?? []).map((recipe) => ({
-          ...recipe,
-          ingredientCount: countByRecipeId.get(recipe.id) ?? 0,
-        }))
+        (recipesResult.data ?? []).map((recipe) => {
+          const ingredientTexts = textsByRecipeId.get(recipe.id) ?? [];
+          return { ...recipe, ingredientCount: ingredientTexts.length, ingredientTexts };
+        })
       );
       setIsLoading(false);
     }
@@ -92,7 +95,7 @@ export default function RecipesPage() {
             }
             return sortRecipesByCreatedAt([
               ...current,
-              { ...newRecipe, ingredientCount: count ?? 0 },
+              { ...newRecipe, ingredientCount: count ?? 0, ingredientTexts: [] },
             ]);
           });
         }
@@ -143,6 +146,15 @@ export default function RecipesPage() {
     };
   }, []);
 
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredRecipes = normalizedQuery
+    ? recipes.filter(
+        (recipe) =>
+          recipe.title.toLowerCase().includes(normalizedQuery) ||
+          recipe.ingredientTexts.some((text) => text.toLowerCase().includes(normalizedQuery))
+      )
+    : recipes;
+
   return (
     <div className="flex flex-col gap-2 sm:gap-4">
       <div className="flex items-center gap-2">
@@ -185,6 +197,12 @@ export default function RecipesPage() {
               >
                 From Photo
               </Link>
+              <Link
+                href="/recipes/import-url"
+                className="min-h-11 flex items-center justify-center rounded-xl bg-surface-muted px-4 text-base font-medium text-foreground transition hover:bg-border"
+              >
+                From URL
+              </Link>
               <button
                 type="button"
                 onClick={() => setIsChoosingRecipeType(false)}
@@ -203,8 +221,20 @@ export default function RecipesPage() {
             </button>
           )}
 
+          {recipes.length > 0 && (
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search recipes or ingredients..."
+              aria-label="Search recipes"
+              autoComplete="off"
+              className="min-h-11 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          )}
+
           <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
-            {recipes.map((recipe) => (
+            {filteredRecipes.map((recipe) => (
               <li key={recipe.id}>
                 <Link
                   href={`/recipes/${recipe.id}`}
@@ -227,6 +257,11 @@ export default function RecipesPage() {
             {recipes.length === 0 && (
               <li className="px-1 py-6 text-center text-sm text-muted-foreground">
                 No recipes yet. Add one to get started.
+              </li>
+            )}
+            {recipes.length > 0 && filteredRecipes.length === 0 && (
+              <li className="px-1 py-6 text-center text-sm text-muted-foreground">
+                No recipes match &ldquo;{searchQuery.trim()}&rdquo;.
               </li>
             )}
           </ul>

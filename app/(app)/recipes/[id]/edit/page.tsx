@@ -14,6 +14,7 @@ export default function EditRecipePage() {
   const [title, setTitle] = useState<string | null>(null);
   const [sourceUrl, setSourceUrl] = useState("");
   const [notes, setNotes] = useState("");
+  const [servings, setServings] = useState("");
   const [ingredients, setIngredients] = useState<RecipeDraftLine[] | null>(null);
   const [steps, setSteps] = useState<RecipeDraftLine[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -27,7 +28,7 @@ export default function EditRecipePage() {
       const [recipeResult, ingredientsResult, stepsResult] = await Promise.all([
         supabase
           .from("recipes")
-          .select("id, title, source_url, notes")
+          .select("id, title, source_url, notes, servings")
           .eq("id", recipeId)
           .maybeSingle(),
         supabase.from("recipe_ingredients").select("position, text").eq("recipe_id", recipeId),
@@ -48,6 +49,7 @@ export default function EditRecipePage() {
       setTitle(recipeResult.data.title);
       setSourceUrl(recipeResult.data.source_url ?? "");
       setNotes(recipeResult.data.notes ?? "");
+      setServings(recipeResult.data.servings ?? "");
       setIngredients(
         sortByPosition(ingredientsResult.data ?? []).map((row) => ({
           key: crypto.randomUUID(),
@@ -72,7 +74,7 @@ export default function EditRecipePage() {
   async function handleSave(input: RecipeSaveInput): Promise<string | null> {
     const { error: recipeError } = await supabase
       .from("recipes")
-      .update({ title: input.title, source_url: input.sourceUrl, notes: input.notes })
+      .update({ title: input.title, source_url: input.sourceUrl, notes: input.notes, servings: input.servings })
       .eq("id", recipeId);
 
     if (recipeError) {
@@ -134,6 +136,7 @@ export default function EditRecipePage() {
           initialTitle={title}
           initialSourceUrl={sourceUrl}
           initialNotes={notes}
+          initialServings={servings}
           initialIngredients={ingredients}
           initialSteps={steps}
           saveLabel="Save Changes"

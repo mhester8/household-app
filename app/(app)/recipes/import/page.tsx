@@ -202,6 +202,7 @@ export default function ImportRecipePage() {
             initialTitle={draft.title ?? ""}
             initialSourceUrl=""
             initialNotes=""
+            initialServings={draft.servings ?? ""}
             initialIngredients={
               draft.ingredients.length > 0
                 ? draft.ingredients.map((text) => ({ key: createDraftLineId(), text }))

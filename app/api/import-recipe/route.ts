@@ -35,6 +35,8 @@ function sanitizeDraft(value: unknown): RecipeImportDraft | null {
   const record = value as Record<string, unknown>;
   const rawTitle = record.title;
   const title = typeof rawTitle === "string" && rawTitle.trim() !== "" ? rawTitle.trim() : null;
+  const rawServings = record.servings;
+  const servings = typeof rawServings === "string" && rawServings.trim() !== "" ? rawServings.trim() : null;
 
   if (!isStringArray(record.ingredients) || !isStringArray(record.steps) || !isStringArray(record.warnings)) {
     return null;
@@ -45,6 +47,7 @@ function sanitizeDraft(value: unknown): RecipeImportDraft | null {
     ingredients: record.ingredients.map((line) => line.trim()).filter((line) => line !== ""),
     steps: record.steps.map((line) => line.trim()).filter((line) => line !== ""),
     warnings: record.warnings.map((line) => line.trim()).filter((line) => line !== ""),
+    servings,
   };
 }
 
@@ -148,7 +151,10 @@ export async function POST(request: Request) {
             "example 'Handwritten text was detected near the ingredients; please review the " +
             "image.' Do not guess at unclear handwriting, and do not report a confidence score.\n\n" +
             "If the photo does not contain a recognizable recipe, return a null title and empty " +
-            "ingredients and steps arrays.",
+            "ingredients and steps arrays.\n\n" +
+            "If a servings count or yield is clearly printed (for example '4 servings', 'Serves 6', " +
+            "'Makes 12 muffins'), put it in the servings field exactly as written. Leave servings " +
+            "null if it isn't stated or isn't clearly legible — never guess or estimate one.",
         },
         {
           role: "user",
@@ -170,8 +176,9 @@ export async function POST(request: Request) {
               ingredients: { type: "array", items: { type: "string" } },
               steps: { type: "array", items: { type: "string" } },
               warnings: { type: "array", items: { type: "string" } },
+              servings: { type: ["string", "null"] },
             },
-            required: ["title", "ingredients", "steps", "warnings"],
+            required: ["title", "ingredients", "steps", "warnings", "servings"],
             additionalProperties: false,
           },
         },

@@ -113,6 +113,46 @@ The household wants to see or compare each other's workouts, templates need an e
 
 ---
 
+## 006 - Saved Recipe Library is the canonical destination for recipes
+
+**Date:** 2026-08-12
+
+**Status:** Active
+
+### Decision
+Treat the saved Recipe Library as the canonical destination for recipes, with multiple future import/discovery methods feeding the same recipe structure.
+
+### Why
+This prevents manual recipes, URL imports, Pinterest imports, and possible future web recipe discovery from becoming separate feature silos. They should ultimately produce the same kind of saved recipe and use the same downstream recipe/ingredient/grocery-list workflows.
+
+### Alternatives considered
+- Creating separate recipe types or storage/workflows for manual recipes, website imports, Pinterest recipes, etc.
+
+### Revisit when
+We discover that an external recipe source contains important information that genuinely cannot be represented reasonably in the existing recipe model.
+
+---
+
+## 007 - Import sources normalize into the existing recipe draft/review flow
+
+**Date:** 2026-08-12
+
+**Status:** Active
+
+### Decision
+Import sources normalize into the existing recipe draft/review flow rather than saving directly to the database.
+
+### Why
+This preserves a human review checkpoint, keeps imports consistent regardless of source, and avoids duplicating recipe persistence logic.
+
+### Alternatives considered
+- Letting each importer write directly to recipe tables or giving URL/Pinterest imports their own save flows.
+
+### Revisit when
+A future import source genuinely cannot be represented or reviewed reasonably through the existing recipe draft structure.
+
+---
+
 ## Maintenance Guidelines
 
 - Record only meaningful product or architectural decisions.
