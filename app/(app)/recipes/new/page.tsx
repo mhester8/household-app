@@ -1,29 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { supabase } from "@/lib/supabase/client";
+import { createRecipe } from "@/lib/recipes";
 import { RecipeForm, newDraftLine, type RecipeSaveInput } from "@/components/RecipeForm";
 
 export default function NewRecipePage() {
   async function handleSave(input: RecipeSaveInput): Promise<string | null> {
-    const { data: recipe, error: recipeError } = await supabase
-      .from("recipes")
-      .insert({ title: input.title, source_url: input.sourceUrl, notes: input.notes })
-      .select("id")
-      .single();
-
-    if (recipeError || !recipe) {
-      return `Couldn't save recipe: ${recipeError?.message ?? "unknown error"}`;
-    }
-
-    const { error: childrenError } = await insertChildren(recipe.id, input);
-
-    if (childrenError) {
-      await supabase.from("recipes").delete().eq("id", recipe.id);
-      return `Couldn't save recipe: ${childrenError}`;
-    }
-
-    return null;
+    const { error } = await createRecipe(input);
+    return error;
   }
 
   return (
@@ -49,29 +33,4 @@ export default function NewRecipePage() {
       />
     </div>
   );
-}
-
-async function insertChildren(
-  recipeId: string,
-  input: RecipeSaveInput
-): Promise<{ error: string | null }> {
-  if (input.ingredients.length > 0) {
-    const { error } = await supabase.from("recipe_ingredients").insert(
-      input.ingredients.map((text, index) => ({ recipe_id: recipeId, position: index, text }))
-    );
-    if (error) {
-      return { error: error.message };
-    }
-  }
-
-  if (input.steps.length > 0) {
-    const { error } = await supabase.from("recipe_steps").insert(
-      input.steps.map((text, index) => ({ recipe_id: recipeId, position: index, text }))
-    );
-    if (error) {
-      return { error: error.message };
-    }
-  }
-
-  return { error: null };
 }

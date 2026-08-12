@@ -12,6 +12,7 @@ export default function RecipesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [thisWeekCount, setThisWeekCount] = useState(0);
+  const [isChoosingRecipeType, setIsChoosingRecipeType] = useState(false);
 
   useEffect(() => {
     async function loadRecipes() {
@@ -170,12 +171,37 @@ export default function RecipesPage() {
         <p className="p-1 text-sm text-muted-foreground">Loading recipes...</p>
       ) : (
         <>
-          <Link
-            href="/recipes/new"
-            className="min-h-11 flex items-center justify-center rounded-xl bg-primary px-4 text-base font-medium text-primary-foreground transition hover:bg-primary/90 active:bg-primary/80"
-          >
-            + New Recipe
-          </Link>
+          {isChoosingRecipeType ? (
+            <div className="flex flex-col gap-2 rounded-xl border border-border bg-surface p-2">
+              <Link
+                href="/recipes/new"
+                className="min-h-11 flex items-center justify-center rounded-xl bg-primary px-4 text-base font-medium text-primary-foreground transition hover:bg-primary/90 active:bg-primary/80"
+              >
+                Write Manually
+              </Link>
+              <Link
+                href="/recipes/import"
+                className="min-h-11 flex items-center justify-center rounded-xl bg-surface-muted px-4 text-base font-medium text-foreground transition hover:bg-border"
+              >
+                From Photo
+              </Link>
+              <button
+                type="button"
+                onClick={() => setIsChoosingRecipeType(false)}
+                className="min-h-11 rounded-xl px-4 text-sm font-semibold text-muted-foreground transition hover:bg-surface-muted"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsChoosingRecipeType(true)}
+              className="min-h-11 flex items-center justify-center rounded-xl bg-primary px-4 text-base font-medium text-primary-foreground transition hover:bg-primary/90 active:bg-primary/80"
+            >
+              + New Recipe
+            </button>
+          )}
 
           <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
             {recipes.map((recipe) => (

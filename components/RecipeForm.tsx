@@ -2,23 +2,30 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import type { RecipeSaveInput } from "@/lib/recipes";
+
+export type { RecipeSaveInput } from "@/lib/recipes";
 
 export type RecipeDraftLine = {
   key: string;
   text: string;
 };
 
-export function newDraftLine(): RecipeDraftLine {
-  return { key: crypto.randomUUID(), text: "" };
+// crypto.randomUUID() is unavailable on some mobile browsers (seen on iOS
+// Safari and Brave) even though `crypto` itself exists. These ids are only
+// ever used as React keys/local form state for draft rows — never
+// persisted as a recipe/database id — so a timestamp + random suffix is a
+// fine collision-resistant fallback.
+export function createDraftLineId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
-export type RecipeSaveInput = {
-  title: string;
-  sourceUrl: string | null;
-  notes: string | null;
-  ingredients: string[];
-  steps: string[];
-};
+export function newDraftLine(): RecipeDraftLine {
+  return { key: createDraftLineId(), text: "" };
+}
 
 // Shared by /recipes/new and /recipes/[id]/edit — same fields and validation,
 // the only difference is what onSave does with the result (insert vs.
@@ -31,6 +38,7 @@ export function RecipeForm({
   initialSteps,
   saveLabel,
   onSave,
+  onSaveSuccess,
 }: {
   initialTitle: string;
   initialSourceUrl: string;
@@ -39,6 +47,11 @@ export function RecipeForm({
   initialSteps: RecipeDraftLine[];
   saveLabel: string;
   onSave: (input: RecipeSaveInput) => Promise<string | null>;
+  // Called instead of the default redirect to /recipes when the caller wants
+  // to send the user somewhere else after a successful save (the photo
+  // importer sends them to the new recipe's detail page). Omit to keep the
+  // existing /recipes redirect used by the manual create/edit flows.
+  onSaveSuccess?: () => void;
 }) {
   const router = useRouter();
 
@@ -97,7 +110,11 @@ export function RecipeForm({
       return;
     }
 
-    router.push("/recipes");
+    if (onSaveSuccess) {
+      onSaveSuccess();
+    } else {
+      router.push("/recipes");
+    }
   }
 
   return (
