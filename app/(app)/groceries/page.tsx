@@ -7,6 +7,7 @@ import {
   type GroceryItem,
   findActiveDuplicate,
   getGrocerySuggestions,
+  insertGroceryItems,
   normalizeItemName,
   upsertItem,
 } from "@/lib/groceryItems";
@@ -212,13 +213,10 @@ export default function GroceriesPage() {
     setItems((currentItems) => upsertItem(currentItems, optimisticItem));
     setNewItemName("");
 
-    const { data, error } = await supabase
-      .from("grocery_items")
-      .insert({ id, name: trimmed })
-      .select("id, name, completed, created_at")
-      .single();
-
-    if (error || !data) {
+    try {
+      const [data] = await insertGroceryItems([{ id, name: trimmed }]);
+      setItems((currentItems) => upsertItem(currentItems, data));
+    } catch {
       localItemIdsRef.current.delete(id);
       setItems((currentItems) => currentItems.filter((item) => item.id !== id));
       showToast(
@@ -230,10 +228,7 @@ export default function GroceriesPage() {
         },
         ERROR_TOAST_MS
       );
-      return;
     }
-
-    setItems((currentItems) => upsertItem(currentItems, data));
   }
 
   function handleAddItemSubmit(event: React.FormEvent) {

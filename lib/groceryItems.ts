@@ -1,3 +1,5 @@
+import { supabase } from "@/lib/supabase/client";
+
 export type GroceryItem = {
   id: string;
   name: string;
@@ -20,6 +22,26 @@ export function upsertItem(currentItems: GroceryItem[], item: GroceryItem) {
     ? currentItems.map((existing) => (existing.id === item.id ? item : existing))
     : [...currentItems, item];
   return sortByCreatedAt(nextItems);
+}
+
+// Shared bulk-insert used by both the manual add form and the recipe
+// "add to shopping list" flow. Callers choose the row ids up front (rather
+// than letting this generate them) so a caller doing optimistic UI — like
+// the manual add form's localItemIdsRef — can register an id before the
+// request goes out, ahead of any Realtime echo of the same insert.
+export async function insertGroceryItems(
+  items: { id: string; name: string }[]
+): Promise<GroceryItem[]> {
+  const { data, error } = await supabase
+    .from("grocery_items")
+    .insert(items)
+    .select("id, name, completed, created_at");
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to add grocery items");
+  }
+
+  return data;
 }
 
 // Normalizes a name for duplicate/suggestion matching only (never for display):
