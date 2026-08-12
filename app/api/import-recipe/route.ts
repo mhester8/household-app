@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 import type { RecipeImportDraft } from "@/lib/recipes";
+import { dedupeAdjacentLines } from "@/lib/recipeImportDedup";
+import { MAX_IMPORT_IMAGES, MAX_TOTAL_IMPORT_IMAGE_BYTES } from "@/lib/recipeImportLimits";
 
 // Kept as a single constant so it's a one-line swap after evaluating quality
 // vs. cost. gpt-5.6-terra is in the current GPT-5.6 line (confirmed as a
@@ -44,8 +46,8 @@ function sanitizeDraft(value: unknown): RecipeImportDraft | null {
 
   return {
     title,
-    ingredients: record.ingredients.map((line) => line.trim()).filter((line) => line !== ""),
-    steps: record.steps.map((line) => line.trim()).filter((line) => line !== ""),
+    ingredients: dedupeAdjacentLines(record.ingredients.map((line) => line.trim()).filter((line) => line !== "")),
+    steps: dedupeAdjacentLines(record.steps.map((line) => line.trim()).filter((line) => line !== "")),
     warnings: record.warnings.map((line) => line.trim()).filter((line) => line !== ""),
     servings,
   };
@@ -82,28 +84,51 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid upload." }, { status: 400 });
   }
 
-  const file = formData.get("image");
+  const files = formData.getAll("images").filter((entry): entry is File => entry instanceof File);
 
-  if (!(file instanceof File) || file.size === 0) {
-    return NextResponse.json({ error: "No image was provided." }, { status: 400 });
+  if (files.length === 0) {
+    return NextResponse.json({ error: "No images were provided." }, { status: 400 });
   }
 
-  if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
+  if (files.length > MAX_IMPORT_IMAGES) {
     return NextResponse.json(
-      { error: "Unsupported image type. Please upload a JPEG, PNG, or WebP photo." },
+      { error: `You can import up to ${MAX_IMPORT_IMAGES} images at a time. Remove some and try again.` },
       { status: 400 }
     );
   }
 
-  if (file.size > MAX_IMAGE_BYTES) {
-    return NextResponse.json({ error: "That image is too large." }, { status: 400 });
+  for (const file of files) {
+    if (file.size === 0) {
+      return NextResponse.json({ error: "One of the selected images is empty." }, { status: 400 });
+    }
+    if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
+      return NextResponse.json(
+        { error: "Unsupported image type. Please upload JPEG, PNG, or WebP photos." },
+        { status: 400 }
+      );
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      return NextResponse.json({ error: "One of the selected images is too large." }, { status: 400 });
+    }
   }
 
-  // The image only ever exists in this request's memory: it's read into a
+  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+  if (totalBytes > MAX_TOTAL_IMPORT_IMAGE_BYTES) {
+    return NextResponse.json(
+      { error: "These images are too large together. Remove one or try smaller photos." },
+      { status: 400 }
+    );
+  }
+
+  // The images only ever exist in this request's memory: each is read into a
   // buffer, base64-encoded for the OpenAI call below, and never written to
   // Supabase, Storage, or disk. Nothing here outlives this request.
-  const bytes = await file.arrayBuffer();
-  const dataUrl = `data:${file.type};base64,${Buffer.from(bytes).toString("base64")}`;
+  const dataUrls = await Promise.all(
+    files.map(async (file) => {
+      const bytes = await file.arrayBuffer();
+      return `data:${file.type};base64,${Buffer.from(bytes).toString("base64")}`;
+    })
+  );
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -122,14 +147,27 @@ export async function POST(request: Request) {
             "decorative headings, food photography, advertisements, nutrition panels, unrelated " +
             "captions, publication branding, and surrounding prose that isn't part of the recipe " +
             "itself.\n\n" +
+            "You may be given more than one image. When there is more than one, they all belong " +
+            "to the same single recipe and are supplied in their intended reading order — for " +
+            "example consecutive screenshots of one long recipe page. Treat them as one combined " +
+            "source: produce one title, one ordered ingredient list, and one ordered set of " +
+            "directions spanning all of them, not a separate recipe per image. Preserve ingredient " +
+            "order and step order as they read across the full sequence of images. Keep section " +
+            "headings (e.g. 'For the sauce') when they're useful for understanding the structure. " +
+            "Consecutive images often overlap — the bottom of one screenshot may repeat the top of " +
+            "the next. When you recognize the same ingredient line, step, or heading repeated " +
+            "because of that overlap, include it only once at its correct position; do not list it " +
+            "twice just because it appeared in two images. Only merge lines you recognize as the " +
+            "same repeated content — never merge two genuinely different ingredients or steps just " +
+            "because they look similar.\n\n" +
             "Preserve each ingredient line as useful free text exactly as it reads in the photo " +
             "(for example '1 pound ground turkey') — do not split it into quantity/unit/name " +
             "fields, and do not invent units or amounts that aren't shown. Preserve the order of " +
             "the steps. Preserve the meaning of the source rather than rewriting it stylistically " +
             "— do not paraphrase, summarize, or improve the wording. Never invent text that isn't " +
-            "legible in the photo: if part of the recipe is cut off, blurry, or otherwise unclear, " +
-            "return whatever is readable and add a warning describing what's missing or unclear " +
-            "instead of guessing at it.\n\n" +
+            "legible in any of the images: if part of the recipe is cut off, blurry, or otherwise " +
+            "unclear in every image it appears in, return whatever is readable and add a warning " +
+            "describing what's missing or unclear instead of guessing at it.\n\n" +
             "Some ingredient lists include a section label that introduces a subgroup of " +
             "ingredients rather than naming an ingredient itself — for example 'Optional " +
             "toppings:', 'Toppings:', 'For serving:', 'For garnish:', 'Garnish:', or 'For the " +
@@ -150,7 +188,7 @@ export async function POST(request: Request) {
             "specific line, leave the printed text unchanged and add a warning instead — for " +
             "example 'Handwritten text was detected near the ingredients; please review the " +
             "image.' Do not guess at unclear handwriting, and do not report a confidence score.\n\n" +
-            "If the photo does not contain a recognizable recipe, return a null title and empty " +
+            "If none of the images contain a recognizable recipe, return a null title and empty " +
             "ingredients and steps arrays.\n\n" +
             "If a servings count or yield is clearly printed (for example '4 servings', 'Serves 6', " +
             "'Makes 12 muffins'), put it in the servings field exactly as written. Leave servings " +
@@ -159,8 +197,20 @@ export async function POST(request: Request) {
         {
           role: "user",
           content: [
-            { type: "input_text", text: "Extract the recipe from this photo." },
-            { type: "input_image", image_url: dataUrl, detail: "high" },
+            {
+              type: "input_text",
+              text:
+                dataUrls.length === 1
+                  ? "Extract the recipe from this photo."
+                  : `Extract the recipe from these ${dataUrls.length} photos, given in reading order. ` +
+                    "They are all of the same recipe.",
+            },
+            ...dataUrls.flatMap((dataUrl, index) => [
+              ...(dataUrls.length > 1
+                ? [{ type: "input_text" as const, text: `Image ${index + 1} of ${dataUrls.length}:` }]
+                : []),
+              { type: "input_image" as const, image_url: dataUrl, detail: "high" as const },
+            ]),
           ],
         },
       ],
@@ -193,7 +243,7 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error("OpenAI recipe import failed:", err);
     return NextResponse.json(
-      { error: "Couldn't read that photo right now. Try again." },
+      { error: files.length === 1 ? "Couldn't read that photo right now. Try again." : "Couldn't read those photos right now. Try again." },
       { status: 502 }
     );
   }

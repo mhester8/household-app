@@ -1,16 +1,23 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import { createRecipe, type RecipeImportDraft, type RecipeSaveInput } from "@/lib/recipes";
 import { RecipeForm, newDraftLine, createDraftLineId } from "@/components/RecipeForm";
+import { MAX_IMPORT_IMAGES, MAX_TOTAL_IMPORT_IMAGE_BYTES } from "@/lib/recipeImportLimits";
 
 const MAX_LONG_EDGE = 1600;
 const JPEG_QUALITY = 0.8;
 
 type Step = "choose" | "extracting" | "error" | "no-recipe" | "draft";
+
+type SelectedImage = {
+  id: string;
+  file: File;
+  previewUrl: string;
+};
 
 // Resizes/re-encodes a picked photo to JPEG using native Canvas APIs so a
 // multi-megabyte phone photo isn't uploaded as-is. If the browser can't
@@ -50,22 +57,44 @@ async function compressImage(file: File): Promise<File> {
   }
 }
 
+function makeId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 export default function ImportRecipePage() {
   const router = useRouter();
 
   const [step, setStep] = useState<Step>("choose");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [draft, setDraft] = useState<RecipeImportDraft | null>(null);
-  const [preparedFile, setPreparedFile] = useState<File | null>(null);
+  const [images, setImages] = useState<SelectedImage[]>([]);
 
   // Guards against a second extraction request firing while one is already
-  // in flight (e.g. a fast double-tap on Retry) — same mutex shape as the
+  // in flight (e.g. a fast double-tap on Import) — same mutex shape as the
   // grocery grouping request on the groceries page.
   const isExtractingRef = useRef(false);
   const savedRecipeIdRef = useRef<string | null>(null);
 
-  async function startExtraction(file: File) {
-    if (isExtractingRef.current) {
+  // Selected files are only ever held as in-memory object URLs for preview.
+  // Individual removals revoke their own URL immediately (see removeImage);
+  // this only handles the remaining case of navigating away with photos
+  // still selected, via a ref so the cleanup always sees the latest list
+  // rather than the one from the render that registered the effect.
+  const imagesRef = useRef<SelectedImage[]>([]);
+  useEffect(() => {
+    imagesRef.current = images;
+  }, [images]);
+  useEffect(() => {
+    return () => {
+      imagesRef.current.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+    };
+  }, []);
+
+  async function startExtraction(selected: SelectedImage[]) {
+    if (isExtractingRef.current || selected.length === 0) {
       return;
     }
     isExtractingRef.current = true;
@@ -84,7 +113,7 @@ export default function ImportRecipePage() {
       }
 
       const body = new FormData();
-      body.append("image", file);
+      selected.forEach((image) => body.append("images", image.file));
 
       const response = await fetch("/api/import-recipe", {
         method: "POST",
@@ -99,7 +128,7 @@ export default function ImportRecipePage() {
         setErrorMessage(
           typeof responseBody?.error === "string"
             ? responseBody.error
-            : "Couldn't extract a recipe from that photo. Try again."
+            : "Couldn't extract a recipe from those photos. Try again."
         );
         return;
       }
@@ -127,35 +156,78 @@ export default function ImportRecipePage() {
   }
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    // Reset so picking the same file again still fires onChange.
+    const pickedFiles = Array.from(event.target.files ?? []);
+    // Reset so picking the same file(s) again still fires onChange.
     event.target.value = "";
-    if (!file) {
+    if (pickedFiles.length === 0) {
       return;
     }
 
     setErrorMessage(null);
+    setStep("choose");
     setDraft(null);
 
-    let compressed: File;
-    try {
-      compressed = await compressImage(file);
-    } catch (err) {
-      console.error("Image compression failed:", err);
-      setPreparedFile(null);
-      setStep("error");
-      setErrorMessage("Couldn't process that photo on this device. Try a different photo.");
+    if (images.length + pickedFiles.length > MAX_IMPORT_IMAGES) {
+      setErrorMessage(
+        `You can import up to ${MAX_IMPORT_IMAGES} images at a time. ` +
+          `You already have ${images.length} selected and picked ${pickedFiles.length} more — ` +
+          `remove some first or pick fewer.`
+      );
       return;
     }
 
-    setPreparedFile(compressed);
-    await startExtraction(compressed);
+    let compressed: File[];
+    try {
+      compressed = await Promise.all(pickedFiles.map((file) => compressImage(file)));
+    } catch (err) {
+      console.error("Image compression failed:", err);
+      setErrorMessage("Couldn't process one of those photos on this device. Try a different photo.");
+      return;
+    }
+
+    const totalBytes =
+      images.reduce((sum, image) => sum + image.file.size, 0) +
+      compressed.reduce((sum, file) => sum + file.size, 0);
+    if (totalBytes > MAX_TOTAL_IMPORT_IMAGE_BYTES) {
+      setErrorMessage("These photos are too large together. Remove one or try fewer/smaller photos.");
+      return;
+    }
+
+    setImages((current) => [
+      ...current,
+      ...compressed.map((file) => ({ id: makeId(), file, previewUrl: URL.createObjectURL(file) })),
+    ]);
+  }
+
+  function removeImage(id: string) {
+    setImages((current) => {
+      const target = current.find((image) => image.id === id);
+      if (target) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      return current.filter((image) => image.id !== id);
+    });
+  }
+
+  function moveImage(id: string, direction: -1 | 1) {
+    setImages((current) => {
+      const index = current.findIndex((image) => image.id === id);
+      const targetIndex = index + direction;
+      if (index === -1 || targetIndex < 0 || targetIndex >= current.length) {
+        return current;
+      }
+      const next = [...current];
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+      return next;
+    });
+  }
+
+  function handleImport() {
+    startExtraction(images);
   }
 
   function handleRetry() {
-    if (preparedFile) {
-      startExtraction(preparedFile);
-    }
+    startExtraction(images);
   }
 
   async function handleSave(input: RecipeSaveInput): Promise<string | null> {
@@ -172,6 +244,7 @@ export default function ImportRecipePage() {
   }
 
   const isExtracting = step === "extracting";
+  const atImageLimit = images.length >= MAX_IMPORT_IMAGES;
 
   return (
     <div className="flex flex-col gap-2 sm:gap-4">
@@ -220,42 +293,122 @@ export default function ImportRecipePage() {
         </>
       ) : (
         <div className="flex flex-col gap-3">
+          <p className="p-1 text-sm text-muted-foreground">
+            Select one or more screenshots of the <span className="font-medium">same recipe</span> — for
+            example, scroll and screenshot in parts if a recipe is too long to fit in one screenshot.
+            They&rsquo;ll be combined into a single recipe.
+          </p>
+
           {step === "no-recipe" && (
             <p className="rounded-xl border border-border bg-surface-muted px-3.5 py-2.5 text-sm text-foreground">
-              No recipe found in this photo. Try a clearer photo or a different image.
+              No recipe found in {images.length === 1 ? "that photo" : "those photos"}. Try clearer photos or
+              different images.
             </p>
           )}
 
-          {step === "error" && errorMessage && (
+          {(step === "error" || step === "choose") && errorMessage && (
             <p className="rounded-xl border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
               {errorMessage}
             </p>
           )}
 
           {isExtracting ? (
-            <p className="p-1 text-sm text-muted-foreground">Reading the photo&hellip;</p>
+            <p className="p-1 text-sm text-muted-foreground">
+              {images.length === 1
+                ? "Reading the photo…"
+                : `Reading ${images.length} photos and combining them into one recipe…`}
+            </p>
           ) : (
-            <div className="flex flex-col gap-2">
-              <label className="flex min-h-11 cursor-pointer items-center justify-center rounded-xl bg-primary px-4 text-base font-medium text-primary-foreground transition hover:bg-primary/90 active:bg-primary/80">
-                {step === "choose" ? "Choose Photo" : "Choose a Different Photo"}
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileChange}
-                  aria-label="Choose a recipe photo"
-                  className="sr-only"
-                />
-              </label>
-
-              {step === "error" && preparedFile && (
-                <button
-                  type="button"
-                  onClick={handleRetry}
-                  className="min-h-11 rounded-xl border border-border px-4 text-sm font-semibold text-foreground transition hover:bg-surface-muted"
-                >
-                  Retry
-                </button>
+            <div className="flex flex-col gap-3">
+              {images.length > 0 && (
+                <ul className="flex flex-col gap-2">
+                  {images.map((image, index) => (
+                    <li
+                      key={image.id}
+                      className="flex items-center gap-3 rounded-xl border border-border bg-surface-muted px-2.5 py-2"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element -- transient client-side blob preview, not a served asset */}
+                      <img
+                        src={image.previewUrl}
+                        alt={`Selected recipe photo ${index + 1}`}
+                        className="h-14 w-14 shrink-0 rounded-lg object-cover"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                        Photo {index + 1} of {images.length}
+                      </span>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => moveImage(image.id, -1)}
+                          disabled={index === 0}
+                          aria-label={`Move photo ${index + 1} earlier`}
+                          className="flex min-h-9 min-w-9 items-center justify-center rounded-lg text-base text-muted-foreground transition hover:bg-surface hover:text-foreground disabled:opacity-30"
+                        >
+                          &uarr;
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveImage(image.id, 1)}
+                          disabled={index === images.length - 1}
+                          aria-label={`Move photo ${index + 1} later`}
+                          className="flex min-h-9 min-w-9 items-center justify-center rounded-lg text-base text-muted-foreground transition hover:bg-surface hover:text-foreground disabled:opacity-30"
+                        >
+                          &darr;
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeImage(image.id)}
+                          aria-label={`Remove photo ${index + 1}`}
+                          className="flex min-h-9 min-w-9 items-center justify-center rounded-lg text-lg text-muted-foreground transition hover:bg-surface hover:text-danger"
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               )}
+
+              <div className="flex flex-col gap-2">
+                <label
+                  className={`flex min-h-11 items-center justify-center rounded-xl border border-border px-4 text-sm font-semibold text-foreground transition hover:bg-surface-muted ${
+                    atImageLimit ? "pointer-events-none opacity-50" : "cursor-pointer"
+                  }`}
+                >
+                  {images.length === 0
+                    ? "Choose Photos"
+                    : `Add More Photos (${images.length}/${MAX_IMPORT_IMAGES})`}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleFileChange}
+                    disabled={atImageLimit}
+                    aria-label="Choose recipe photos"
+                    className="sr-only"
+                  />
+                </label>
+
+                {images.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleImport}
+                    className="min-h-11 rounded-xl bg-primary px-4 text-base font-medium text-primary-foreground transition hover:bg-primary/90 active:bg-primary/80"
+                  >
+                    {images.length === 1 ? "Import Photo" : `Import ${images.length} Photos as One Recipe`}
+                  </button>
+                )}
+
+                {step === "error" && images.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    className="min-h-11 rounded-xl border border-border px-4 text-sm font-semibold text-foreground transition hover:bg-surface-muted"
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
