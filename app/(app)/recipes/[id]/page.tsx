@@ -12,17 +12,12 @@ import {
   type RecipeIngredient,
   type RecipeStep,
 } from "@/lib/recipes";
-import {
-  findActiveDuplicate,
-  insertGroceryItems,
-  type GroceryItem,
-} from "@/lib/groceryItems";
+import type { ThisWeekRecipe } from "@/lib/thisWeek";
+import { IngredientReviewPanel, type IngredientReviewLine } from "@/components/IngredientReviewPanel";
 import { Toast, type ToastState } from "@/components/Toast";
 
-// Matches the toast durations used on the groceries page for the same tones.
-const SUCCESS_TOAST_MS = 4000;
+// Matches the toast durations used on the groceries page for the same tone.
 const ERROR_TOAST_MS = 6000;
-const INFO_TOAST_MS = 3000;
 
 export default function RecipeDetailPage() {
   const params = useParams<{ id: string }>();
@@ -39,19 +34,18 @@ export default function RecipeDetailPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // "Add to shopping list" review panel. activeGroceryItems is null until the
-  // panel's duplicate-check fetch resolves; once loaded, ingredients that
-  // match an active grocery item (via the same normalization the manual add
-  // form uses) are shown disabled/unchecked instead of being silently
-  // dropped at submit time.
+  // "Add to shopping list" review panel — conditionally rendered, so opening
+  // it always mounts a fresh IngredientReviewPanel with clean state.
   const [isShoppingPanelOpen, setIsShoppingPanelOpen] = useState(false);
-  const [activeGroceryItems, setActiveGroceryItems] = useState<GroceryItem[] | null>(null);
-  const [isLoadingActiveItems, setIsLoadingActiveItems] = useState(false);
-  const [loadActiveItemsError, setLoadActiveItemsError] = useState<string | null>(null);
-  const [selectedIngredientIds, setSelectedIngredientIds] = useState<Set<string>>(new Set());
-  const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // This Week queue membership for this recipe. thisWeekRowId is the
+  // this_week_recipes row id, needed to know a delete has a row to target;
+  // null while unqueued or before the initial lookup resolves.
+  const [isInThisWeek, setIsInThisWeek] = useState(false);
+  const [thisWeekRowId, setThisWeekRowId] = useState<string | null>(null);
+  const [isTogglingThisWeek, setIsTogglingThisWeek] = useState(false);
 
   useEffect(() => {
     async function loadRecipe() {
@@ -88,10 +82,29 @@ export default function RecipeDetailPage() {
     loadRecipe();
   }, [recipeId]);
 
+  // Look up whether this recipe is already queued in This Week, independent
+  // of the recipe load above (a failure here shouldn't block viewing the
+  // recipe — it just leaves the toggle showing "Add to This Week").
+  useEffect(() => {
+    async function loadThisWeekStatus() {
+      const { data } = await supabase
+        .from("this_week_recipes")
+        .select("id")
+        .eq("recipe_id", recipeId)
+        .maybeSingle();
+
+      setIsInThisWeek(!!data);
+      setThisWeekRowId(data?.id ?? null);
+    }
+
+    loadThisWeekStatus();
+  }, [recipeId]);
+
   // Subscribe to Realtime changes for this one recipe so another device's
-  // edit to it (or to its ingredients/steps) shows up here without a
-  // refresh. Scoped to recipeId via the postgres_changes filter, same
-  // approach as the shopping list's channel, just narrowed to one row.
+  // edit to it (or to its ingredients/steps, or its This Week membership)
+  // shows up here without a refresh. Scoped to recipeId via the
+  // postgres_changes filter, same approach as the shopping list's channel,
+  // just narrowed to one row.
   useEffect(() => {
     const channel = supabase
       .channel("recipe_detail_changes")
@@ -170,6 +183,23 @@ export default function RecipeDetailPage() {
           setSteps((current) => removeLineById(current, deletedId));
         }
       )
+      .on<ThisWeekRecipe>(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "this_week_recipes", filter: `recipe_id=eq.${recipeId}` },
+        (payload) => {
+          const row = payload.new as ThisWeekRecipe;
+          setIsInThisWeek(true);
+          setThisWeekRowId(row.id);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "this_week_recipes", filter: `recipe_id=eq.${recipeId}` },
+        () => {
+          setIsInThisWeek(false);
+          setThisWeekRowId(null);
+        }
+      )
       .subscribe((status, err) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.error("Supabase Realtime subscription issue:", status, err);
@@ -218,215 +248,74 @@ export default function RecipeDetailPage() {
     setToast(null);
   }
 
-  async function openShoppingPanel() {
-    setIsShoppingPanelOpen(true);
-    setLoadActiveItemsError(null);
-    setIsLoadingActiveItems(true);
+  async function handleToggleThisWeek() {
+    setIsTogglingThisWeek(true);
 
-    const { data, error } = await supabase
-      .from("grocery_items")
-      .select("id, name, completed, created_at")
-      .eq("completed", false);
+    if (isInThisWeek) {
+      const previousRowId = thisWeekRowId;
+      setIsInThisWeek(false);
+      setThisWeekRowId(null);
 
-    // If the duplicate check itself fails, don't block the flow on it —
-    // fall back to treating nothing as a known duplicate so every ingredient
-    // stays selectable.
-    const active = error || !data ? [] : data;
-    if (error) {
-      setLoadActiveItemsError(error.message);
-    }
+      const { error } = await supabase.from("this_week_recipes").delete().eq("recipe_id", recipeId);
 
-    setActiveGroceryItems(active);
-    setSelectedIngredientIds(
-      new Set(
-        ingredients
-          .filter((ingredient) => !findActiveDuplicate(active, ingredient.text))
-          .map((ingredient) => ingredient.id)
-      )
-    );
-    setIsLoadingActiveItems(false);
-  }
-
-  function closeShoppingPanel() {
-    setIsShoppingPanelOpen(false);
-    setActiveGroceryItems(null);
-    setSelectedIngredientIds(new Set());
-    setLoadActiveItemsError(null);
-  }
-
-  function toggleIngredientSelected(id: string) {
-    setSelectedIngredientIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
+      if (error) {
+        setIsInThisWeek(true);
+        setThisWeekRowId(previousRowId);
+        showToast(
+          {
+            message: "Couldn't remove from This Week",
+            actionLabel: "Retry",
+            onAction: () => handleToggleThisWeek(),
+            tone: "danger",
+          },
+          ERROR_TOAST_MS
+        );
       }
-      return next;
-    });
+    } else {
+      setIsInThisWeek(true);
+
+      const { data, error } = await supabase
+        .from("this_week_recipes")
+        .insert({ recipe_id: recipeId })
+        .select("id")
+        .single();
+
+      if (error) {
+        // A unique-constraint violation means another device already queued
+        // this recipe — the row exists either way, so this is a success, not
+        // a failure. Look up its id so a later remove has something to
+        // target instead of leaving thisWeekRowId stale.
+        if (error.code === "23505") {
+          const { data: existing } = await supabase
+            .from("this_week_recipes")
+            .select("id")
+            .eq("recipe_id", recipeId)
+            .maybeSingle();
+          setThisWeekRowId(existing?.id ?? null);
+        } else {
+          setIsInThisWeek(false);
+          showToast(
+            {
+              message: "Couldn't add to This Week",
+              actionLabel: "Retry",
+              onAction: () => handleToggleThisWeek(),
+              tone: "danger",
+            },
+            ERROR_TOAST_MS
+          );
+        }
+      } else {
+        setThisWeekRowId(data.id);
+      }
+    }
+
+    setIsTogglingThisWeek(false);
   }
 
-  async function handleAddSelectedToShoppingList() {
-    const selected = ingredients.filter((ingredient) => selectedIngredientIds.has(ingredient.id));
-    if (selected.length === 0) {
-      return;
-    }
-
-    setIsSubmittingAdd(true);
-
-    // Another device could have added one of these since the panel opened —
-    // re-check right before inserting and quietly drop anything that's now
-    // a duplicate. Unlike the panel-open check, a failure here must abort
-    // instead of falling back to the stale selection: inserting without a
-    // successful recheck could create a duplicate the user can no longer see
-    // was ever a risk.
-    const { data: freshActive, error: freshActiveError } = await supabase
-      .from("grocery_items")
-      .select("id, name, completed, created_at")
-      .eq("completed", false);
-
-    if (freshActiveError || !freshActive) {
-      setIsSubmittingAdd(false);
-      showToast(
-        {
-          message: "Couldn't verify the shopping list. Try again.",
-          actionLabel: "Retry",
-          onAction: () => handleAddSelectedToShoppingList(),
-          tone: "danger",
-        },
-        ERROR_TOAST_MS
-      );
-      return;
-    }
-
-    const toInsert = selected.filter((ingredient) => !findActiveDuplicate(freshActive, ingredient.text));
-    const skippedCount = selected.length - toInsert.length;
-
-    if (toInsert.length === 0) {
-      setIsSubmittingAdd(false);
-      closeShoppingPanel();
-      showToast({ message: "Those items are already on the shopping list" }, INFO_TOAST_MS);
-      return;
-    }
-
-    try {
-      await insertGroceryItems(
-        toInsert.map((ingredient) => ({ id: crypto.randomUUID(), name: ingredient.text }))
-      );
-      setIsSubmittingAdd(false);
-      closeShoppingPanel();
-      const itemWord = toInsert.length === 1 ? "item" : "items";
-      showToast(
-        {
-          message:
-            skippedCount > 0
-              ? `Added ${toInsert.length} ${itemWord} (${skippedCount} already on the list)`
-              : `Added ${toInsert.length} ${itemWord} to the shopping list`,
-        },
-        SUCCESS_TOAST_MS
-      );
-    } catch {
-      setIsSubmittingAdd(false);
-      showToast(
-        {
-          message: "Couldn't add items to the shopping list",
-          actionLabel: "Retry",
-          onAction: () => handleAddSelectedToShoppingList(),
-          tone: "danger",
-        },
-        ERROR_TOAST_MS
-      );
-    }
-  }
-
-  const duplicateIngredientIds = activeGroceryItems
-    ? new Set(
-        ingredients
-          .filter((ingredient) => findActiveDuplicate(activeGroceryItems, ingredient.text))
-          .map((ingredient) => ingredient.id)
-      )
-    : new Set<string>();
-  const selectableCount = ingredients.length - duplicateIngredientIds.size;
-
-  function renderShoppingListPanel() {
-    return (
-      <div className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-4">
-        <span className="text-sm font-semibold text-foreground">
-          Add ingredients to the shopping list
-        </span>
-
-        {loadActiveItemsError && (
-          <p className="text-xs text-muted-foreground">
-            Couldn&rsquo;t check your shopping list for duplicates ({loadActiveItemsError}). Showing
-            all ingredients as selectable.
-          </p>
-        )}
-
-        {isLoadingActiveItems || activeGroceryItems === null ? (
-          <p className="text-sm text-muted-foreground">Checking your shopping list...</p>
-        ) : (
-          <>
-            <ul className="flex flex-col gap-1">
-              {ingredients.map((ingredient) => {
-                const isDuplicate = duplicateIngredientIds.has(ingredient.id);
-                const isChecked = selectedIngredientIds.has(ingredient.id);
-                return (
-                  <li key={ingredient.id}>
-                    <label
-                      className={`flex min-h-11 items-center gap-2.5 rounded-lg px-1.5 py-1 text-[15px] ${
-                        isDuplicate ? "text-muted-foreground" : "text-foreground"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        disabled={isDuplicate}
-                        onChange={() => toggleIngredientSelected(ingredient.id)}
-                        className="h-5 w-5 shrink-0 rounded border-border/80 text-primary focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-                      />
-                      <span className="min-w-0 flex-1 break-words">{ingredient.text}</span>
-                      {isDuplicate && (
-                        <span className="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                          Already on list
-                        </span>
-                      )}
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
-
-            {selectableCount === 0 && (
-              <p className="text-sm text-muted-foreground">
-                All ingredients are already on the shopping list.
-              </p>
-            )}
-          </>
-        )}
-
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={closeShoppingPanel}
-            disabled={isSubmittingAdd}
-            className="min-h-11 flex-1 rounded-xl bg-surface-muted px-4 text-sm font-semibold text-foreground transition hover:bg-border disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleAddSelectedToShoppingList}
-            disabled={isSubmittingAdd || isLoadingActiveItems || selectedIngredientIds.size === 0}
-            className="min-h-11 flex-1 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
-          >
-            {isSubmittingAdd
-              ? "Adding..."
-              : `Add ${selectedIngredientIds.size} item${selectedIngredientIds.size === 1 ? "" : "s"}`}
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const reviewLines: IngredientReviewLine[] = ingredients.map((ingredient) => ({
+    id: ingredient.id,
+    text: ingredient.text,
+  }));
 
   return (
     <div className="flex flex-col gap-2 sm:gap-4">
@@ -457,7 +346,15 @@ export default function RecipeDetailPage() {
             <h1 className="min-w-0 break-words text-xl font-bold tracking-tight text-primary">
               {recipe.title}
             </h1>
-            <div className="flex shrink-0 gap-2">
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={handleToggleThisWeek}
+                disabled={isTogglingThisWeek}
+                className="rounded-full bg-surface-muted px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-border disabled:opacity-50"
+              >
+                {isInThisWeek ? "Remove from This Week" : "Add to This Week"}
+              </button>
               <Link
                 href={`/recipes/${recipe.id}/edit`}
                 className="flex min-h-11 items-center rounded-xl px-3 text-sm font-semibold text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
@@ -491,7 +388,7 @@ export default function RecipeDetailPage() {
                 {!isShoppingPanelOpen && (
                   <button
                     type="button"
-                    onClick={openShoppingPanel}
+                    onClick={() => setIsShoppingPanelOpen(true)}
                     className="rounded-full bg-surface-muted px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-border"
                   >
                     Add to shopping list
@@ -505,7 +402,14 @@ export default function RecipeDetailPage() {
                   </li>
                 ))}
               </ul>
-              {isShoppingPanelOpen && renderShoppingListPanel()}
+              {isShoppingPanelOpen && (
+                <IngredientReviewPanel
+                  lines={reviewLines}
+                  onCancel={() => setIsShoppingPanelOpen(false)}
+                  onAdded={() => setIsShoppingPanelOpen(false)}
+                  onToast={showToast}
+                />
+              )}
             </div>
           )}
 

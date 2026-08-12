@@ -11,6 +11,7 @@ export default function RecipesPage() {
   const [recipes, setRecipes] = useState<RecipeWithCount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [thisWeekCount, setThisWeekCount] = useState(0);
 
   useEffect(() => {
     async function loadRecipes() {
@@ -50,6 +51,19 @@ export default function RecipesPage() {
     }
 
     loadRecipes();
+  }, []);
+
+  // A head-only count query — the list only needs a number here, not the
+  // queued rows themselves (those live on /recipes/this-week).
+  useEffect(() => {
+    async function loadThisWeekCount() {
+      const { count } = await supabase
+        .from("this_week_recipes")
+        .select("id", { count: "exact", head: true });
+      setThisWeekCount(count ?? 0);
+    }
+
+    loadThisWeekCount();
   }, []);
 
   // Subscribe to Realtime changes so another device's adds/edits/deletes show
@@ -100,6 +114,20 @@ export default function RecipesPage() {
           setRecipes((current) => current.filter((recipe) => recipe.id !== deletedId));
         }
       )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "this_week_recipes" },
+        () => {
+          setThisWeekCount((current) => current + 1);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "this_week_recipes" },
+        () => {
+          setThisWeekCount((current) => Math.max(0, current - 1));
+        }
+      )
       .subscribe((status, err) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.error("Supabase Realtime subscription issue:", status, err);
@@ -124,6 +152,12 @@ export default function RecipesPage() {
           &lsaquo; Home
         </Link>
         <h1 className="text-xl font-bold tracking-tight text-primary">Recipes</h1>
+        <Link
+          href="/recipes/this-week"
+          className="ml-auto shrink-0 rounded-full bg-surface-muted px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-border"
+        >
+          This Week ({thisWeekCount})
+        </Link>
       </div>
 
       {errorMessage && (
