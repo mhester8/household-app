@@ -243,6 +243,17 @@ export default function RecipesPage() {
                 cookTimeMinutes: recipe.cook_time_minutes,
                 totalTimeMinutes: recipe.total_time_minutes,
               });
+              // The stored servings value already reads naturally on its own
+              // (e.g. "Serves 4", "4 servings") — shown as-is, with no added
+              // label, so it's never duplicated into something like "Serves
+              // Serves 4".
+              const cardMetadata = [
+                `${recipe.ingredientCount} ingredient${recipe.ingredientCount === 1 ? "" : "s"}`,
+                recipe.servings,
+                cardTime,
+              ]
+                .filter((part): part is string => Boolean(part))
+                .join(" · ");
               return (
                 <li key={recipe.id}>
                   <Link
@@ -253,10 +264,7 @@ export default function RecipesPage() {
                       <span className="truncate text-[15px] font-medium text-foreground">
                         {recipe.title}
                       </span>
-                      <span className="text-sm text-muted-foreground">
-                        {recipe.ingredientCount} ingredient{recipe.ingredientCount === 1 ? "" : "s"}
-                        {cardTime ? ` · ${cardTime}` : ""}
-                      </span>
+                      <span className="text-sm text-muted-foreground">{cardMetadata}</span>
                     </div>
                     <span aria-hidden="true" className="shrink-0 text-xl text-primary">
                       &rsaquo;
