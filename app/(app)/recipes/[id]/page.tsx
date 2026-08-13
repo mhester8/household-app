@@ -15,6 +15,7 @@ import {
 import type { ThisWeekRecipe } from "@/lib/thisWeek";
 import { IngredientReviewPanel, type IngredientReviewLine } from "@/components/IngredientReviewPanel";
 import { Toast, type ToastState } from "@/components/Toast";
+import { detailTimeSegments } from "@/lib/recipeTime";
 
 // Matches the toast durations used on the groceries page for the same tone.
 const ERROR_TOAST_MS = 6000;
@@ -55,7 +56,9 @@ export default function RecipeDetailPage() {
       const [recipeResult, ingredientsResult, stepsResult] = await Promise.all([
         supabase
           .from("recipes")
-          .select("id, title, source_url, notes, servings, created_at")
+          .select(
+            "id, title, source_url, notes, servings, prep_time_minutes, cook_time_minutes, total_time_minutes, created_at"
+          )
           .eq("id", recipeId)
           .maybeSingle(),
         supabase.from("recipe_ingredients").select("id, recipe_id, position, text").eq("recipe_id", recipeId),
@@ -317,6 +320,14 @@ export default function RecipeDetailPage() {
     text: ingredient.text,
   }));
 
+  const timeSegments = recipe
+    ? detailTimeSegments({
+        prepTimeMinutes: recipe.prep_time_minutes,
+        cookTimeMinutes: recipe.cook_time_minutes,
+        totalTimeMinutes: recipe.total_time_minutes,
+      })
+    : [];
+
   return (
     <div className="flex flex-col gap-2 sm:gap-4">
       <div className="flex items-center gap-2">
@@ -366,6 +377,16 @@ export default function RecipeDetailPage() {
 
           {recipe.servings && (
             <p className="text-sm text-muted-foreground">Servings: {recipe.servings}</p>
+          )}
+
+          {timeSegments.length > 0 && (
+            <p className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground">
+              {timeSegments.map((segment) => (
+                <span key={segment.label}>
+                  {segment.label}: {segment.text}
+                </span>
+              ))}
+            </p>
           )}
 
           {recipe.source_url && (

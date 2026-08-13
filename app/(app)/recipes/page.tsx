@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import { sortRecipesByCreatedAt, type Recipe } from "@/lib/recipes";
+import { cardTimeSummary } from "@/lib/recipeTime";
 
 type RecipeWithCount = Recipe & { ingredientCount: number; ingredientTexts: string[] };
 
@@ -23,7 +24,9 @@ export default function RecipesPage() {
       const [recipesResult, ingredientsResult] = await Promise.all([
         supabase
           .from("recipes")
-          .select("id, title, source_url, notes, servings, created_at")
+          .select(
+            "id, title, source_url, notes, servings, prep_time_minutes, cook_time_minutes, total_time_minutes, created_at"
+          )
           .order("created_at", { ascending: true }),
         supabase.from("recipe_ingredients").select("recipe_id, text"),
       ]);
@@ -234,26 +237,34 @@ export default function RecipesPage() {
           )}
 
           <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
-            {filteredRecipes.map((recipe) => (
-              <li key={recipe.id}>
-                <Link
-                  href={`/recipes/${recipe.id}`}
-                  className="flex items-center justify-between gap-2 px-2.5 py-3 transition hover:bg-surface-muted"
-                >
-                  <div className="flex min-w-0 flex-col gap-0.5">
-                    <span className="truncate text-[15px] font-medium text-foreground">
-                      {recipe.title}
+            {filteredRecipes.map((recipe) => {
+              const cardTime = cardTimeSummary({
+                prepTimeMinutes: recipe.prep_time_minutes,
+                cookTimeMinutes: recipe.cook_time_minutes,
+                totalTimeMinutes: recipe.total_time_minutes,
+              });
+              return (
+                <li key={recipe.id}>
+                  <Link
+                    href={`/recipes/${recipe.id}`}
+                    className="flex items-center justify-between gap-2 px-2.5 py-3 transition hover:bg-surface-muted"
+                  >
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <span className="truncate text-[15px] font-medium text-foreground">
+                        {recipe.title}
+                      </span>
+                      <span className="text-sm text-muted-foreground">
+                        {recipe.ingredientCount} ingredient{recipe.ingredientCount === 1 ? "" : "s"}
+                        {cardTime ? ` · ${cardTime}` : ""}
+                      </span>
+                    </div>
+                    <span aria-hidden="true" className="shrink-0 text-xl text-primary">
+                      &rsaquo;
                     </span>
-                    <span className="text-sm text-muted-foreground">
-                      {recipe.ingredientCount} ingredient{recipe.ingredientCount === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  <span aria-hidden="true" className="shrink-0 text-xl text-primary">
-                    &rsaquo;
-                  </span>
-                </Link>
-              </li>
-            ))}
+                  </Link>
+                </li>
+              );
+            })}
             {recipes.length === 0 && (
               <li className="px-1 py-6 text-center text-sm text-muted-foreground">
                 No recipes yet. Add one to get started.

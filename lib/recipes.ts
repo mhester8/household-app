@@ -6,6 +6,9 @@ export type Recipe = {
   source_url: string | null;
   notes: string | null;
   servings: string | null;
+  prep_time_minutes: number | null;
+  cook_time_minutes: number | null;
+  total_time_minutes: number | null;
   created_at: string;
 };
 
@@ -56,6 +59,9 @@ export type RecipeSaveInput = {
   sourceUrl: string | null;
   notes: string | null;
   servings: string | null;
+  prepTimeMinutes: number | null;
+  cookTimeMinutes: number | null;
+  totalTimeMinutes: number | null;
   ingredients: string[];
   steps: string[];
 };
@@ -67,7 +73,9 @@ export type RecipeSaveInput = {
 // prefill the existing Source URL field; the photo importer leaves it
 // undefined. `servings` preserves the source's stated yield wording (e.g.
 // "Serves 6") rather than forcing it into a number — null when absent or
-// not confidently readable.
+// not confidently readable. `prepTimeMinutes`/`cookTimeMinutes`/
+// `totalTimeMinutes` are only ever set from a value the source actually
+// stated; importers never calculate one from the others.
 export type RecipeImportDraft = {
   title: string | null;
   ingredients: string[];
@@ -75,6 +83,9 @@ export type RecipeImportDraft = {
   warnings: string[];
   sourceUrl?: string;
   servings: string | null;
+  prepTimeMinutes: number | null;
+  cookTimeMinutes: number | null;
+  totalTimeMinutes: number | null;
 };
 
 async function insertChildren(recipeId: string, input: RecipeSaveInput): Promise<string | null> {
@@ -107,7 +118,15 @@ export async function createRecipe(
 ): Promise<{ id: string; error: null } | { id: null; error: string }> {
   const { data: recipe, error: recipeError } = await supabase
     .from("recipes")
-    .insert({ title: input.title, source_url: input.sourceUrl, notes: input.notes, servings: input.servings })
+    .insert({
+      title: input.title,
+      source_url: input.sourceUrl,
+      notes: input.notes,
+      servings: input.servings,
+      prep_time_minutes: input.prepTimeMinutes,
+      cook_time_minutes: input.cookTimeMinutes,
+      total_time_minutes: input.totalTimeMinutes,
+    })
     .select("id")
     .single();
 

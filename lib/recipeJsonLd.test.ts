@@ -6,7 +6,10 @@ import {
   normalizeRecipeNode,
   flattenInstructions,
   hasUsableContent,
+  parseIsoDurationToMinutes,
 } from "./recipeJsonLd.ts";
+
+const NO_TIME = { prepTimeMinutes: null, cookTimeMinutes: null, totalTimeMinutes: null };
 
 function scriptTag(json: string): string {
   return `<script type="application/ld+json">${json}</script>`;
@@ -149,12 +152,56 @@ test("flattenInstructions returns [] for missing/unrecognized instructions", () 
 });
 
 test("hasUsableContent requires a title, an ingredient, or a step", () => {
-  assert.equal(hasUsableContent({ title: null, ingredients: [], steps: [], servings: null }), false);
-  assert.equal(hasUsableContent({ title: "Soup", ingredients: [], steps: [], servings: null }), true);
-  assert.equal(hasUsableContent({ title: null, ingredients: ["salt"], steps: [], servings: null }), true);
-  assert.equal(hasUsableContent({ title: null, ingredients: [], steps: ["boil"], servings: null }), true);
+  assert.equal(hasUsableContent({ title: null, ingredients: [], steps: [], servings: null, ...NO_TIME }), false);
+  assert.equal(hasUsableContent({ title: "Soup", ingredients: [], steps: [], servings: null, ...NO_TIME }), true);
+  assert.equal(hasUsableContent({ title: null, ingredients: ["salt"], steps: [], servings: null, ...NO_TIME }), true);
+  assert.equal(hasUsableContent({ title: null, ingredients: [], steps: ["boil"], servings: null, ...NO_TIME }), true);
   // Servings alone doesn't make an otherwise-empty draft usable.
-  assert.equal(hasUsableContent({ title: null, ingredients: [], steps: [], servings: "Serves 4" }), false);
+  assert.equal(hasUsableContent({ title: null, ingredients: [], steps: [], servings: "Serves 4", ...NO_TIME }), false);
+  // Nor does time alone.
+  assert.equal(
+    hasUsableContent({ title: null, ingredients: [], steps: [], servings: null, prepTimeMinutes: 20, cookTimeMinutes: null, totalTimeMinutes: null }),
+    false
+  );
+});
+
+test("parseIsoDurationToMinutes handles common recipe duration forms", () => {
+  assert.equal(parseIsoDurationToMinutes("PT20M"), 20);
+  assert.equal(parseIsoDurationToMinutes("PT1H"), 60);
+  assert.equal(parseIsoDurationToMinutes("PT1H30M"), 90);
+});
+
+test("parseIsoDurationToMinutes returns null for a missing value", () => {
+  assert.equal(parseIsoDurationToMinutes(undefined), null);
+  assert.equal(parseIsoDurationToMinutes(null), null);
+});
+
+test("parseIsoDurationToMinutes returns null for malformed/unsupported durations", () => {
+  assert.equal(parseIsoDurationToMinutes("20 minutes"), null);
+  assert.equal(parseIsoDurationToMinutes("P1D"), null);
+  assert.equal(parseIsoDurationToMinutes("PT1H30M15S"), null);
+  assert.equal(parseIsoDurationToMinutes("PT"), null);
+  assert.equal(parseIsoDurationToMinutes(90), null);
+});
+
+test("normalizeRecipeNode reads prepTime/cookTime/totalTime as minutes", () => {
+  const draft = normalizeRecipeNode({
+    "@type": "Recipe",
+    name: "Soup",
+    prepTime: "PT20M",
+    cookTime: "PT40M",
+    totalTime: "PT1H",
+  });
+  assert.equal(draft.prepTimeMinutes, 20);
+  assert.equal(draft.cookTimeMinutes, 40);
+  assert.equal(draft.totalTimeMinutes, 60);
+});
+
+test("normalizeRecipeNode leaves time fields null when absent or unsupported", () => {
+  const draft = normalizeRecipeNode({ "@type": "Recipe", name: "Soup", totalTime: "P1D" });
+  assert.equal(draft.prepTimeMinutes, null);
+  assert.equal(draft.cookTimeMinutes, null);
+  assert.equal(draft.totalTimeMinutes, null);
 });
 
 test("normalizeRecipeNode reads a string recipeYield", () => {
@@ -192,6 +239,9 @@ test("end-to-end: a full Recipe JSON-LD page normalizes into a usable draft", ()
           "@type": "Recipe",
           name: "Tomato Soup",
           recipeYield: "4 servings",
+          prepTime: "PT20M",
+          cookTime: "PT40M",
+          totalTime: "PT1H",
           recipeIngredient: ["2 cups tomatoes", "1 tsp salt"],
           recipeInstructions: [
             { "@type": "HowToStep", text: "Boil water." },
@@ -209,5 +259,31 @@ test("end-to-end: a full Recipe JSON-LD page normalizes into a usable draft", ()
   assert.deepEqual(draft.ingredients, ["2 cups tomatoes", "1 tsp salt"]);
   assert.deepEqual(draft.steps, ["Boil water.", "Add tomatoes."]);
   assert.equal(draft.servings, "4 servings");
+  assert.equal(draft.prepTimeMinutes, 20);
+  assert.equal(draft.cookTimeMinutes, 40);
+  assert.equal(draft.totalTimeMinutes, 60);
   assert.equal(hasUsableContent(draft), true);
+});
+
+test("end-to-end: a Recipe with only totalTime normalizes prep/cook as null", () => {
+  const html = `
+    <html><head>
+      ${scriptTag(
+        JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "Recipe",
+          name: "Tomato Soup",
+          totalTime: "PT2H",
+          recipeIngredient: ["2 cups tomatoes"],
+        })
+      )}
+    </head></html>
+  `;
+  const blocks = extractJsonLdBlocks(html);
+  const node = findRecipeNode(blocks);
+  assert.ok(node);
+  const draft = normalizeRecipeNode(node!);
+  assert.equal(draft.prepTimeMinutes, null);
+  assert.equal(draft.cookTimeMinutes, null);
+  assert.equal(draft.totalTimeMinutes, 120);
 });

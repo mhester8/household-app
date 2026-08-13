@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { RecipeSaveInput } from "@/lib/recipes";
+import { hoursMinutesToTotalMinutes, totalMinutesToHoursMinutesStrings } from "@/lib/recipeTime";
 
 export type { RecipeSaveInput } from "@/lib/recipes";
 
@@ -35,6 +36,9 @@ export function RecipeForm({
   initialSourceUrl,
   initialNotes,
   initialServings,
+  initialPrepTimeMinutes,
+  initialCookTimeMinutes,
+  initialTotalTimeMinutes,
   initialIngredients,
   initialSteps,
   saveLabel,
@@ -45,6 +49,9 @@ export function RecipeForm({
   initialSourceUrl: string;
   initialNotes: string;
   initialServings: string;
+  initialPrepTimeMinutes: number | null;
+  initialCookTimeMinutes: number | null;
+  initialTotalTimeMinutes: number | null;
   initialIngredients: RecipeDraftLine[];
   initialSteps: RecipeDraftLine[];
   saveLabel: string;
@@ -61,10 +68,27 @@ export function RecipeForm({
   const [sourceUrl, setSourceUrl] = useState(initialSourceUrl);
   const [notes, setNotes] = useState(initialNotes);
   const [servings, setServings] = useState(initialServings);
+
+  const initialPrep = totalMinutesToHoursMinutesStrings(initialPrepTimeMinutes);
+  const initialCook = totalMinutesToHoursMinutesStrings(initialCookTimeMinutes);
+  const initialTotal = totalMinutesToHoursMinutesStrings(initialTotalTimeMinutes);
+  const [prepHours, setPrepHours] = useState(initialPrep.hours);
+  const [prepMinutes, setPrepMinutes] = useState(initialPrep.minutes);
+  const [cookHours, setCookHours] = useState(initialCook.hours);
+  const [cookMinutes, setCookMinutes] = useState(initialCook.minutes);
+  const [totalHours, setTotalHours] = useState(initialTotal.hours);
+  const [totalMinutes, setTotalMinutes] = useState(initialTotal.minutes);
+
   const [ingredients, setIngredients] = useState<RecipeDraftLine[]>(initialIngredients);
   const [steps, setSteps] = useState<RecipeDraftLine[]>(initialSteps);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  const timeRows = [
+    { label: "Prep time", hours: prepHours, setHours: setPrepHours, minutes: prepMinutes, setMinutes: setPrepMinutes },
+    { label: "Cook time", hours: cookHours, setHours: setCookHours, minutes: cookMinutes, setMinutes: setCookMinutes },
+    { label: "Total time", hours: totalHours, setHours: setTotalHours, minutes: totalMinutes, setMinutes: setTotalMinutes },
+  ];
 
   function updateIngredient(key: string, text: string) {
     setIngredients((current) => current.map((line) => (line.key === key ? { ...line, text } : line)));
@@ -98,6 +122,15 @@ export function RecipeForm({
       return;
     }
 
+    const prep = hoursMinutesToTotalMinutes(prepHours, prepMinutes);
+    const cook = hoursMinutesToTotalMinutes(cookHours, cookMinutes);
+    const total = hoursMinutesToTotalMinutes(totalHours, totalMinutes);
+    const timeError = prep.error ?? cook.error ?? total.error;
+    if (timeError) {
+      setErrorMessage(timeError);
+      return;
+    }
+
     setIsSaving(true);
 
     const error = await onSave({
@@ -105,6 +138,9 @@ export function RecipeForm({
       sourceUrl: trimmedSourceUrl === "" ? null : trimmedSourceUrl,
       notes: trimmedNotes === "" ? null : trimmedNotes,
       servings: trimmedServings === "" ? null : trimmedServings,
+      prepTimeMinutes: prep.minutes,
+      cookTimeMinutes: cook.minutes,
+      totalTimeMinutes: total.minutes,
       ingredients: trimmedIngredients,
       steps: trimmedSteps,
     });
@@ -150,6 +186,39 @@ export function RecipeForm({
           autoComplete="off"
           className="min-h-11 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
+
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-semibold text-foreground">Time (optional)</span>
+          <div className="flex flex-col gap-2">
+            {timeRows.map((row) => (
+              <div key={row.label} className="flex items-center gap-2">
+                <span className="w-20 shrink-0 text-sm text-muted-foreground">{row.label}</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  value={row.hours}
+                  onChange={(event) => row.setHours(event.target.value)}
+                  placeholder="0"
+                  aria-label={`${row.label}, hours`}
+                  className="min-h-11 w-16 min-w-0 rounded-xl border border-border bg-surface-muted px-2.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <span className="text-sm text-muted-foreground">hr</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  value={row.minutes}
+                  onChange={(event) => row.setMinutes(event.target.value)}
+                  placeholder="0"
+                  aria-label={`${row.label}, minutes`}
+                  className="min-h-11 w-16 min-w-0 rounded-xl border border-border bg-surface-muted px-2.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <span className="text-sm text-muted-foreground">min</span>
+              </div>
+            ))}
+          </div>
+        </div>
 
         <input
           type="url"

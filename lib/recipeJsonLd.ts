@@ -16,6 +16,9 @@ export type NormalizedRecipeDraft = {
   ingredients: string[];
   steps: string[];
   servings: string | null;
+  prepTimeMinutes: number | null;
+  cookTimeMinutes: number | null;
+  totalTimeMinutes: number | null;
 };
 
 const JSON_LD_SCRIPT_RE =
@@ -131,6 +134,45 @@ function normalizeServings(node: Record<string, unknown>): string | null {
   return normalizeYieldValue(raw);
 }
 
+// Schema.org's prepTime/cookTime/totalTime are ISO-8601 durations. Real
+// recipe pages only ever need the hours-and-minutes subset of that format
+// (PT20M, PT1H, PT1H30M) — this deliberately doesn't attempt days, weeks, or
+// seconds, and returns null for anything outside that subset rather than
+// guessing at a value.
+const ISO_DURATION_RE = /^PT(?:(\d+)H)?(?:(\d+)M)?$/;
+
+export function parseIsoDurationToMinutes(value: unknown): number | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const match = ISO_DURATION_RE.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+  const [, hoursPart, minutesPart] = match;
+  if (hoursPart === undefined && minutesPart === undefined) {
+    return null;
+  }
+  const hours = hoursPart === undefined ? 0 : Number(hoursPart);
+  const minutes = minutesPart === undefined ? 0 : Number(minutesPart);
+  return hours * 60 + minutes;
+}
+
+// Some sites give an array of duration values for the same field. As with
+// recipeYield, the first value that actually parses is used.
+function normalizeDurationValue(value: unknown): number | null {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const minutes = parseIsoDurationToMinutes(item);
+      if (minutes !== null) {
+        return minutes;
+      }
+    }
+    return null;
+  }
+  return parseIsoDurationToMinutes(value);
+}
+
 // `recipeIngredient` is the correct Schema.org property; `ingredients` is
 // accepted too since it shows up on some real sites' (incorrect) markup and
 // costs nothing extra to check.
@@ -222,6 +264,9 @@ export function normalizeRecipeNode(node: Record<string, unknown>): NormalizedRe
     ingredients: normalizeIngredients(node),
     steps: flattenInstructions(node.recipeInstructions),
     servings: normalizeServings(node),
+    prepTimeMinutes: normalizeDurationValue(node.prepTime),
+    cookTimeMinutes: normalizeDurationValue(node.cookTime),
+    totalTimeMinutes: normalizeDurationValue(node.totalTime),
   };
 }
 

@@ -107,6 +107,9 @@ export async function POST(request: Request) {
     warnings: [],
     sourceUrl: fetchResult.finalUrl,
     servings: normalized.servings,
+    prepTimeMinutes: normalized.prepTimeMinutes,
+    cookTimeMinutes: normalized.cookTimeMinutes,
+    totalTimeMinutes: normalized.totalTimeMinutes,
   };
 
   return NextResponse.json(draft);

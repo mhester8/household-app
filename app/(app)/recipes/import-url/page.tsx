@@ -137,6 +137,9 @@ export default function ImportRecipeFromUrlPage() {
             initialSourceUrl={draft.sourceUrl ?? url.trim()}
             initialNotes=""
             initialServings={draft.servings ?? ""}
+            initialPrepTimeMinutes={draft.prepTimeMinutes}
+            initialCookTimeMinutes={draft.cookTimeMinutes}
+            initialTotalTimeMinutes={draft.totalTimeMinutes}
             initialIngredients={
               draft.ingredients.length > 0
                 ? draft.ingredients.map((text) => ({ key: createDraftLineId(), text }))

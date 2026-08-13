@@ -27,6 +27,17 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
+// Coerces a model-provided time field to a non-negative integer number of
+// minutes, or null. Never trust the raw value blindly — a negative number,
+// a fraction, or a non-number all collapse to null rather than being
+// rejected outright, matching the leniency already used for title/servings.
+function sanitizeMinutes(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+  return Math.round(value);
+}
+
 // Never trust the model's output shape blindly, even under strict mode —
 // coerce/trim/drop-empty so downstream code always sees clean data.
 function sanitizeDraft(value: unknown): RecipeImportDraft | null {
@@ -50,6 +61,9 @@ function sanitizeDraft(value: unknown): RecipeImportDraft | null {
     steps: dedupeAdjacentLines(record.steps.map((line) => line.trim()).filter((line) => line !== "")),
     warnings: record.warnings.map((line) => line.trim()).filter((line) => line !== ""),
     servings,
+    prepTimeMinutes: sanitizeMinutes(record.prepTimeMinutes),
+    cookTimeMinutes: sanitizeMinutes(record.cookTimeMinutes),
+    totalTimeMinutes: sanitizeMinutes(record.totalTimeMinutes),
   };
 }
 
@@ -192,7 +206,18 @@ export async function POST(request: Request) {
             "ingredients and steps arrays.\n\n" +
             "If a servings count or yield is clearly printed (for example '4 servings', 'Serves 6', " +
             "'Makes 12 muffins'), put it in the servings field exactly as written. Leave servings " +
-            "null if it isn't stated or isn't clearly legible — never guess or estimate one.",
+            "null if it isn't stated or isn't clearly legible — never guess or estimate one.\n\n" +
+            "If prep time, cook time, and/or total time are clearly printed (for example 'Prep: 20 " +
+            "min', 'Cook Time: 40 minutes', 'Ready in 1 hr 30 min'), convert each to a whole number " +
+            "of minutes and put it in the matching field (prepTimeMinutes, cookTimeMinutes, " +
+            "totalTimeMinutes). Only fill in a field when its value is directly stated in the " +
+            "image — never calculate or estimate one from another (do not compute total from prep " +
+            "+ cook, and do not split a total into prep/cook). If the recipe shows only one overall " +
+            "duration that isn't labeled as specifically prep or cook (for example just 'Total " +
+            "Time: 45 min', or a single unlabeled duration near the title), treat it as " +
+            "totalTimeMinutes rather than guessing it's prep or cook. If the source gives prep and " +
+            "cook separately, preserve that distinction instead of merging them. Leave a time field " +
+            "null if it isn't clearly stated or isn't legible.",
         },
         {
           role: "user",
@@ -227,8 +252,20 @@ export async function POST(request: Request) {
               steps: { type: "array", items: { type: "string" } },
               warnings: { type: "array", items: { type: "string" } },
               servings: { type: ["string", "null"] },
+              prepTimeMinutes: { type: ["integer", "null"] },
+              cookTimeMinutes: { type: ["integer", "null"] },
+              totalTimeMinutes: { type: ["integer", "null"] },
             },
-            required: ["title", "ingredients", "steps", "warnings", "servings"],
+            required: [
+              "title",
+              "ingredients",
+              "steps",
+              "warnings",
+              "servings",
+              "prepTimeMinutes",
+              "cookTimeMinutes",
+              "totalTimeMinutes",
+            ],
             additionalProperties: false,
           },
         },

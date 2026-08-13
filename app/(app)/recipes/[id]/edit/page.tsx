@@ -15,6 +15,9 @@ export default function EditRecipePage() {
   const [sourceUrl, setSourceUrl] = useState("");
   const [notes, setNotes] = useState("");
   const [servings, setServings] = useState("");
+  const [prepTimeMinutes, setPrepTimeMinutes] = useState<number | null>(null);
+  const [cookTimeMinutes, setCookTimeMinutes] = useState<number | null>(null);
+  const [totalTimeMinutes, setTotalTimeMinutes] = useState<number | null>(null);
   const [ingredients, setIngredients] = useState<RecipeDraftLine[] | null>(null);
   const [steps, setSteps] = useState<RecipeDraftLine[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -28,7 +31,7 @@ export default function EditRecipePage() {
       const [recipeResult, ingredientsResult, stepsResult] = await Promise.all([
         supabase
           .from("recipes")
-          .select("id, title, source_url, notes, servings")
+          .select("id, title, source_url, notes, servings, prep_time_minutes, cook_time_minutes, total_time_minutes")
           .eq("id", recipeId)
           .maybeSingle(),
         supabase.from("recipe_ingredients").select("position, text").eq("recipe_id", recipeId),
@@ -50,6 +53,9 @@ export default function EditRecipePage() {
       setSourceUrl(recipeResult.data.source_url ?? "");
       setNotes(recipeResult.data.notes ?? "");
       setServings(recipeResult.data.servings ?? "");
+      setPrepTimeMinutes(recipeResult.data.prep_time_minutes ?? null);
+      setCookTimeMinutes(recipeResult.data.cook_time_minutes ?? null);
+      setTotalTimeMinutes(recipeResult.data.total_time_minutes ?? null);
       setIngredients(
         sortByPosition(ingredientsResult.data ?? []).map((row) => ({
           key: crypto.randomUUID(),
@@ -74,7 +80,15 @@ export default function EditRecipePage() {
   async function handleSave(input: RecipeSaveInput): Promise<string | null> {
     const { error: recipeError } = await supabase
       .from("recipes")
-      .update({ title: input.title, source_url: input.sourceUrl, notes: input.notes, servings: input.servings })
+      .update({
+        title: input.title,
+        source_url: input.sourceUrl,
+        notes: input.notes,
+        servings: input.servings,
+        prep_time_minutes: input.prepTimeMinutes,
+        cook_time_minutes: input.cookTimeMinutes,
+        total_time_minutes: input.totalTimeMinutes,
+      })
       .eq("id", recipeId);
 
     if (recipeError) {
@@ -137,6 +151,9 @@ export default function EditRecipePage() {
           initialSourceUrl={sourceUrl}
           initialNotes={notes}
           initialServings={servings}
+          initialPrepTimeMinutes={prepTimeMinutes}
+          initialCookTimeMinutes={cookTimeMinutes}
+          initialTotalTimeMinutes={totalTimeMinutes}
           initialIngredients={ingredients}
           initialSteps={steps}
           saveLabel="Save Changes"

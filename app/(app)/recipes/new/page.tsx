@@ -27,6 +27,9 @@ export default function NewRecipePage() {
         initialSourceUrl=""
         initialNotes=""
         initialServings=""
+        initialPrepTimeMinutes={null}
+        initialCookTimeMinutes={null}
+        initialTotalTimeMinutes={null}
         initialIngredients={[newDraftLine()]}
         initialSteps={[newDraftLine()]}
         saveLabel="Save Recipe"
