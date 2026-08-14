@@ -78,6 +78,16 @@ test("formatScaledQuantity falls back to a short decimal otherwise", () => {
   assert.equal(formatScaledQuantity(1.42857), "1.43");
 });
 
+test("formatScaledQuantity picks the closest fraction, not the first within an old tight tolerance", () => {
+  // Real values observed from scaling by 1/3 — each ~0.0417 from its
+  // nearest candidate, which used to be too far for the old 0.02 window
+  // and fell back to an ugly two-decimal value.
+  assert.equal(formatScaledQuantity(0.5 / 3), "⅛"); // 0.1667 -> ⅛, not "0.17"
+  assert.equal(formatScaledQuantity(1.75 / 3), "⅝"); // 0.5833 -> ⅝, not "0.58"
+  assert.equal(formatScaledQuantity(2.5 / 3), "⅞"); // 0.8333 -> ⅞, not "0.83"
+  assert.equal(formatScaledQuantity(8 / 3), "2⅔"); // 2.6667 -> 2⅔
+});
+
 test("scaleIngredientLine scales a leading integer", () => {
   assert.equal(scaleIngredientLine("2 cups broth", 2 / 3), "1⅓ cups broth");
 });
@@ -96,6 +106,38 @@ test("scaleIngredientLine scales a leading unicode fraction", () => {
 
 test("scaleIngredientLine scales a leading mixed number", () => {
   assert.equal(scaleIngredientLine("1 1/2 cups broth", 2), "3 cups broth");
+});
+
+test("scaleIngredientLine real example: ASCII fraction scaled by 1/3", () => {
+  assert.equal(scaleIngredientLine("1/2 teaspoon white pepper", 1 / 3), "⅛ teaspoon white pepper");
+});
+
+test("scaleIngredientLine real example: mixed number scaled by 1/3", () => {
+  assert.equal(scaleIngredientLine("1 3/4 cup self-rising flour", 1 / 3), "⅝ cup self-rising flour");
+});
+
+test("scaleIngredientLine real example: another mixed number scaled by 1/3", () => {
+  assert.equal(
+    scaleIngredientLine("2 1/2 tablespoons melted ghee (or butter)", 1 / 3),
+    "⅞ tablespoons melted ghee (or butter)"
+  );
+});
+
+test("scaleIngredientLine real example: integer scaled by 1/3", () => {
+  assert.equal(scaleIngredientLine("8 cups chicken stock or broth", 1 / 3), "2⅔ cups chicken stock or broth");
+});
+
+test("scaleIngredientLine leaves a compound 'plus' quantity unscaled", () => {
+  assert.equal(scaleIngredientLine("3/4 cup plus 2 tablespoons whole milk", 1 / 3), null);
+});
+
+test("scaleIngredientLine leaves a compound 'and' quantity unscaled but not ordinary prose", () => {
+  assert.equal(scaleIngredientLine("1 cup and 2 tablespoons flour", 2), null);
+  // "and" not immediately followed by a number is just ordinary text.
+  assert.equal(
+    scaleIngredientLine("5 russet potatoes, peeled and chopped", 2),
+    "10 russet potatoes, peeled and chopped"
+  );
 });
 
 test("scaleIngredientLine leaves a range unscaled", () => {

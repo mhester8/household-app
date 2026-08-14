@@ -169,6 +169,17 @@ function isUnscalableContext(rest: string): boolean {
   if (descriptorMatch && PACKAGE_UNIT_WORDS.has(descriptorMatch[1].toLowerCase())) {
     return true;
   }
+  // "3/4 cup plus 2 tablespoons whole milk" — a second quantity later in
+  // the line as part of the total amount ("plus"/"and" directly followed
+  // by a number). Scaling only the leading quantity would silently drop
+  // the second one and understate the real amount, so the whole line is
+  // left unscaled rather than guessing how to combine or scale both.
+  // Requiring a digit immediately after "plus"/"and" keeps this from
+  // tripping on ordinary prose like "peeled and chopped" or "salt and
+  // pepper", which never have a number in that position.
+  if (/\b(?:plus|and)\s+\d/i.test(rest)) {
+    return true;
+  }
   return false;
 }
 
@@ -183,27 +194,52 @@ const NICE_FRACTIONS: { value: number; display: string }[] = [
   { value: 3 / 4, display: "¾" },
   { value: 7 / 8, display: "⅞" },
 ];
-const FRACTION_SNAP_TOLERANCE = 0.02;
 
-// Deterministic recipe-quantity formatting: snap close to a common cooking
-// fraction, snap close to a whole number, otherwise fall back to a short
-// decimal (at most 2 places). Never a general measurement/unit system —
-// just avoids ugly output like "0.6666666667" for the cases this module
-// itself produces.
+// Tight — only cleans up floating-point noise right at a whole number (e.g.
+// 1.9999999998 from repeated division), not a general "round to nearest
+// whole" rule.
+const WHOLE_NUMBER_SNAP_TOLERANCE = 0.02;
+
+// How far the fractional part may sit from its closest NICE_FRACTIONS entry
+// and still use that fraction. The tightest gap between two adjacent
+// candidates above is 1/3 to 3/8 (and 5/8 to 2/3), each exactly 1/24
+// (~0.0417) apart — so scaling by common ratios like thirds routinely lands
+// about that far from its nearest candidate (e.g. 1.75 * 1/3 = 0.5833..,
+// which is exactly 0.0417 from ⅝). 0.05 comfortably covers that real case
+// without reaching into the next candidate's territory, while a value that
+// lands roughly in the middle of a gap (error over ~0.06) still falls back
+// to a decimal rather than being forced into a misleading fraction.
+const FRACTION_SNAP_TOLERANCE = 0.05;
+
+// Deterministic recipe-quantity formatting: snap close to a whole number,
+// else use the closest common cooking fraction if it's within tolerance,
+// else fall back to a short decimal (at most 2 places). Never a general
+// measurement/unit system — just avoids ugly output like "0.8333333333"
+// for the cases this module itself produces. Ties between two equally
+// close fractions resolve to whichever is listed first in NICE_FRACTIONS
+// above, for determinism.
 export function formatScaledQuantity(value: number): string {
   const whole = Math.floor(value);
   const fractional = value - whole;
 
-  if (fractional >= 1 - FRACTION_SNAP_TOLERANCE) {
+  if (fractional >= 1 - WHOLE_NUMBER_SNAP_TOLERANCE) {
     return String(whole + 1);
   }
-  if (fractional <= FRACTION_SNAP_TOLERANCE) {
+  if (fractional <= WHOLE_NUMBER_SNAP_TOLERANCE) {
     return String(whole);
   }
+
+  let closest: { value: number; display: string } | null = null;
+  let closestDistance = Infinity;
   for (const nice of NICE_FRACTIONS) {
-    if (Math.abs(fractional - nice.value) <= FRACTION_SNAP_TOLERANCE) {
-      return whole > 0 ? `${whole}${nice.display}` : nice.display;
+    const distance = Math.abs(fractional - nice.value);
+    if (distance < closestDistance) {
+      closest = nice;
+      closestDistance = distance;
     }
+  }
+  if (closest && closestDistance <= FRACTION_SNAP_TOLERANCE) {
+    return whole > 0 ? `${whole}${closest.display}` : closest.display;
   }
 
   return String(Math.round(value * 100) / 100);
