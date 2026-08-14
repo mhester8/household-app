@@ -1,6 +1,6 @@
 # Hester House — Project State
 
-_Last generated at commit `4db02e7` ("Import recipes from Pinterest images"). This document is a snapshot, not a live source of truth — re-verify against the repo when facts matter._
+_Last generated at commit `37e092a` ("Document current Hester House project state"), updated to reflect the Notes V1 milestone landing on top of it. This document is a snapshot, not a live source of truth — re-verify against the repo when facts matter._
 
 This file is a shared briefing for AI coding assistants (Claude Code, ChatGPT, etc.) picking up work on this project. It should reduce the need to re-read the entire repository before making a change. It intentionally does not cover implementation trivia a coding agent can discover locally in seconds.
 
@@ -13,11 +13,12 @@ This file is a shared briefing for AI coding assistants (Claude Code, ChatGPT, e
 
 ## 1. Product summary
 
-Hester House is a private, single-household web app used by two people (login-only, no public sign-up). It currently has three working feature areas:
+Hester House is a private, single-household web app used by two people (login-only, no public sign-up). It currently has four working feature areas:
 
 - **Groceries** — one shared shopping list.
 - **Workouts** — per-user templates and logged workout sessions.
 - **Recipes** — a saved recipe library populated manually, by URL import, by photo import, or by Pinterest import.
+- **Notes** — a simple shared household notebook (freeform text, not task management — see section 5).
 
 It is a personal project built incrementally (see `docs/decisions.md`), deployed at `hesterhouse.app`.
 
@@ -29,7 +30,7 @@ It is a personal project built incrementally (see `docs/decisions.md`), deployed
 
 Hester House is used primarily on phones by two household members, sometimes concurrently. Phone usability is a primary acceptance criterion for any UI change — the code backs this up throughout: 44px-minimum touch targets (`min-h-11` etc.) on nearly every interactive element, HEIC/HEIF handling for phone-camera photos, `crypto.randomUUID()` fallbacks for mobile browsers observed not to support it (iOS Safari, Brave), and a `next.config.ts` LAN-IP allowance specifically for testing the dev server from a phone over Wi-Fi.
 
-Because shared features (groceries, recipes, This Week) can be used from two devices at once, cross-device/Realtime behavior is a real product concern, not an edge case — a meaningful change to a shared feature should be checked on a real device when practical. This is **not** an offline-first requirement; offline support remains deliberately unbuilt (section 9).
+Because shared features (groceries, recipes, This Week, Notes) can be used from two devices at once, cross-device/Realtime behavior is a real product concern, not an edge case — a meaningful change to a shared feature should be checked on a real device when practical. This is **not** an offline-first requirement; offline support remains deliberately unbuilt (section 9). Notes' inline new-note composer was specifically shaped around a real iOS/WebKit constraint (a route navigation loses the "trusted user gesture" needed to auto-open the keyboard) — see section 5.
 
 ---
 
@@ -42,7 +43,7 @@ Confirmed from `package.json`, `next.config.ts`, and `docs/decisions.md`:
 - **OpenAI** (`openai` ^7.4.0 SDK) — server-side only, used for recipe-photo/Pin-image text extraction and grocery-item categorization
 - **Pinterest API v5** — OAuth connection, board listing, Pin listing (no other third-party API)
 - **Deployment: Vercel**, custom domain `hesterhouse.app` (decision 004; manually confirmed live in production — section 10). No `vercel.json` in the repo — deployment config lives in the Vercel dashboard, not version-controlled.
-- **Testing**: `node --test` against pure-function unit tests in `lib/` (`recipeJsonLd`, `recipeImportDedup`, `recipeTime`, `recipeServings`, `recipeCardMeta`, `recipeImages`), run via `npm test`. No integration/e2e coverage.
+- **Testing**: `node --test` against pure-function unit tests in `lib/` (`recipeJsonLd`, `recipeImportDedup`, `recipeTime`, `recipeServings`, `recipeCardMeta`, `recipeImages`, `notes`), run via `npm test`. No integration/e2e coverage. Note: `lib/notes.ts` and `lib/notePersistence.ts` are deliberately separate files — the former is pure/tested, the latter does the actual Supabase I/O and, like `lib/groceryItems.ts`/`lib/recipes.ts`, has no test file because the plain `node --test` runner can't resolve the `@/...` path alias its Supabase import needs.
 - **Lint/type-check**: `eslint` (flat config, `eslint-config-next`) via `npm run lint`; type-checking happens as part of `next build`.
 
 No ORM — all database access goes through the `@supabase/supabase-js` client directly.
@@ -58,7 +59,7 @@ No ORM — all database access goes through the `@supabase/supabase-js` client d
 - **Every API route** authenticates independently: reads a `Bearer <access_token>`, then calls `supabase.auth.getUser(token)` against a client built with only the public anon key — **no service-role key is used anywhere in this codebase.**
 - Pinterest routes that need to read/write the caller's own `pinterest_connections` row under RLS build a **user-scoped Supabase client**, forwarding the caller's own access token, so `auth.uid()` resolves correctly — still no service-role key.
 - **Shared vs. per-user data**:
-  - **Shared, no per-user ownership**: `grocery_items`, `pantry_basics`, `recipes` (+ ingredients/steps), `this_week_recipes`.
+  - **Shared, no per-user ownership**: `grocery_items`, `pantry_basics`, `recipes` (+ ingredients/steps), `this_week_recipes`, `notes`.
   - **Per-user (RLS-scoped)**: `workout_templates`, `workout_sessions` (+ exercises/sets), `pinterest_connections` (decision 005; Pinterest follows the same per-user pattern since each person has their own account).
 - **RLS policy content itself is not in this repository** — schema/policies are hand-managed in the Supabase dashboard. The app's behavior only makes sense if RLS enforces per-user scoping server-side; this can't be independently confirmed from Git.
 
@@ -86,6 +87,18 @@ One shared, realtime-synced list (`grocery_items`). Add/edit/complete/delete wit
 - **Pantry basics** (shared list): filters ingredient-review by whole-word match against a small household vocabulary.
 - **This Week**: a shared queue with an optional per-entry `desired_servings` override; "Add to shopping list" pools (and optionally scales) ingredients across every queued recipe.
 - Every import source converges on the same `RecipeForm` review/save step before anything is persisted (decisions 006–007) — no direct-save import path exists or should be added.
+
+### Notes
+
+A simple shared household notebook (decision 008) — deliberately **not** a task-management system. No folders, tags, due dates, reminders, priorities, or task statuses; nothing checks anything off.
+
+- **Data**: one shared table, `notes` (id, title, body, pinned, archived_at, created_at, updated_at) — no per-user ownership, same shared-access shape as `grocery_items`. `updated_at` reflects title/body content saves only; pinning and archiving deliberately never touch it.
+- **List** (`/notes`): pinned notes, then recent notes (most-recently-edited first); a restrained "Archived (n)" entry point rather than a visible tab. Titles are optional — a note with no title displays its body's first line instead.
+- **Search**: client-side, across title and body, and **includes archived notes** (with a quiet "Archived" tag on matches) — an intentional choice at this household's scale rather than Postgres full-text search infrastructure.
+- **Creating a note**: inline on `/notes` itself, not a separate route. `/notes/new` does not exist. The composer's textarea is always mounted (just visually collapsed) so tapping "+ New note" can call `.focus()` synchronously inside that same tap — the only way to reliably open iOS's software keyboard, since a route navigation loses the "trusted gesture" a later `focus()` call would need. Opening the composer and leaving it untouched creates nothing; the first real autosave creates the row, and the user stays in the same inline composer afterward (no navigation to `/notes/[id]` mid-write) so the keyboard is never dismissed by a route change.
+- **Editing an existing note**: `/notes/[id]`. Debounced autosave (~650ms after typing stops), no Save button, quiet "Saving…/Saved" status text, retry-capable error toast on failure. A small muted "Created Aug 14 · Edited 3:51 PM"-style line shows on the edit view only (not on list rows).
+- **Archive/restore, delete+undo**: same optimistic-toast pattern *shapes* as Groceries (archive/restore mirrors its complete-toggle — apply immediately, Undo-capable toast; delete mirrors its delete — row disappears immediately, short undo window before the real delete commits).
+- **Realtime**: the list subscribes to the whole `notes` table (INSERT/UPDATE/DELETE) so another device's changes appear without a refresh. The open-note editor additionally subscribes to `UPDATE` scoped to just that note's id. If a remote update arrives while the local editor has no unsaved changes, it adopts the new content; if the local editor is dirty, it keeps the local draft and shows a quiet "Updated on another device" notice instead of overwriting it — **last successful save wins**, deliberately not a merge. This is intentionally simple last-write-wins collaboration, not a collaborative-document system (decision 008).
 
 ### Pinterest recipe integration
 
@@ -124,13 +137,13 @@ No Supabase **service-role** key is used or referenced anywhere. Actual producti
 
 **Schema and RLS policies are hand-managed in the Supabase dashboard — no migrations directory exists in this repo.** The following is reconstructed from columns the app actually selects/inserts/updates; treat it as reasonably reliable, not an authoritative schema dump.
 
-Shared: `grocery_items` (id, name, completed, created_at) · `pantry_basics` (id, name, created_at; unique on name) · `recipes` (id, title, source_url, notes, servings, prep/cook/total_time_minutes, image_url, pinterest_pin_url, created_at) · `recipe_ingredients` / `recipe_steps` (id, recipe_id, position, text) · `this_week_recipes` (id, recipe_id, added_at, desired_servings; unique on recipe_id).
+Shared: `grocery_items` (id, name, completed, created_at) · `pantry_basics` (id, name, created_at; unique on name) · `recipes` (id, title, source_url, notes, servings, prep/cook/total_time_minutes, image_url, pinterest_pin_url, created_at) · `recipe_ingredients` / `recipe_steps` (id, recipe_id, position, text) · `this_week_recipes` (id, recipe_id, added_at, desired_servings; unique on recipe_id) · `notes` (id, title, body, pinned, archived_at, created_at, updated_at).
 
 Per-user (RLS-scoped): `workout_templates` (id, name, created_at) · `template_exercises` (id, template_id, position, name, sets, rest_seconds) · `workout_sessions` (id, template_id, name, started_at, completed_at; at most one row per user with completed_at IS NULL, enforced in the database) · `session_exercises` (snapshotted, not FK'd to templates) · `session_sets` (id, session_exercise_id, set_number, weight, reps, completed_at) · `pinterest_connections` (user_id unique, access/refresh tokens + expiries, scope, timestamps).
 
 **Storage**: one bucket, `recipe-images`, public URLs, object path `{recipe_id}/{random-id}.{ext}`; a replace always uploads a new object and best-effort deletes the old one. **Manually confirmed created as public, with add/replace/delete photo flows tested successfully** (section 10).
 
-**Realtime**: subscribed on `grocery_items`, `recipes`, `recipe_ingredients`, `recipe_steps`, `this_week_recipes`. Whether Realtime replication is enabled per-table in the live project is a dashboard setting not verifiable from Git — the app does show a visible error banner if a channel subscription fails.
+**Realtime**: subscribed on `grocery_items`, `recipes`, `recipe_ingredients`, `recipe_steps`, `this_week_recipes`, `notes`. Whether Realtime replication is enabled per-table in the live project is a dashboard setting not verifiable from Git — the app does show a visible error banner if a channel subscription fails.
 
 ---
 
@@ -149,6 +162,7 @@ Per-user (RLS-scoped): `workout_templates` (id, name, created_at) · `template_e
 - **SSRF-safety for any server-side fetch of a user-/third-party-supplied URL** — reuse `lib/safeUrlFetch.ts`'s pattern rather than calling `fetch` directly. It knowingly doesn't close DNS-rebinding, a deliberate tradeoff for this app's two-user threat model.
 - **Optimistic UI with reconciliation**, not blocking spinners, for shared-list mutations — apply locally, roll back with a retry-capable toast on failure, de-duplicate against the Realtime echo of one's own write.
 - **Real-device testing for meaningful shared-feature changes** (section 2) — phone usability and cross-device Realtime behavior are acceptance criteria, not afterthoughts.
+- **iOS only auto-opens the keyboard for a `focus()` call made synchronously inside the original trusted tap, on a field that already exists in the DOM at that instant** — a route navigation, or mounting the field later in an effect, both miss that window regardless of how short the delay is. Notes' inline composer (section 5) keeps its field permanently mounted (CSS-hidden, never `display:none`/`visibility:hidden`, which *would* block focus) specifically so a "quick capture" tap can focus it synchronously. Relevant to any future mobile-first capture-on-tap UI, not just Notes.
 
 ---
 
@@ -192,6 +206,6 @@ Intentionally **not** built — don't add speculatively without a product decisi
 
 ## 11. Current project state
 
-As of commit `4db02e7`, the Pinterest recipe-import integration is complete, manually validated, and working — closing out the "recipe import sources" arc from decisions 006–007. Groceries, workouts, and the recipe library (manual/URL/photo/Pinterest import, scaling, pantry basics, This Week) are all functioning end-to-end on the live production deployment.
+The Pinterest recipe-import integration (closing out the "recipe import sources" arc from decisions 006–007) and Notes V1 (decision 008) are both complete, manually validated, and working. Groceries, workouts, the recipe library (manual/URL/photo/Pinterest import, scaling, pantry basics, This Week), and Notes (freeform shared notes, pinned/recent, search including archived, archive/restore, delete+undo, autosave, inline mobile-first capture, same-note Realtime) are all functioning end-to-end on the live production deployment.
 
 The repository does not itself establish what the next priority is — `docs/decisions.md` has no open/pending decision, and there is no roadmap document. Treat "what's next" as an open question to ask the user rather than something to infer from the repo.

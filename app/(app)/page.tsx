@@ -53,7 +53,7 @@ export default function HomePage() {
         title="Groceries"
         description="Shared shopping list"
       />
-      <FeatureCard title="Notes & To-Dos" description="Coming soon" />
+      <FeatureCard href="/notes" title="Notes" description="Shared household notebook" />
       <FeatureCard href="/workouts" title="Workouts" description="Templates & sessions" />
       <FeatureCard href="/recipes" title="Recipes" description="Saved recipe library" />
     </div>

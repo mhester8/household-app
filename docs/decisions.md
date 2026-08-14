@@ -153,6 +153,32 @@ A future import source genuinely cannot be represented or reviewed reasonably th
 
 ---
 
+## 008 - Notes: flat, shared household notebook with last-write-wins collaboration
+
+**Date:** 2026-08-14
+
+**Status:** Active
+
+### Decision
+Build Notes as a flat, shared household notebook, not a task-management system. Notes use shared authenticated access (no per-user ownership), matching the grocery-list pattern rather than the per-user workout pattern. V1 organization is limited to pinned/recent ordering, search (across title and body, including archived notes), and archive/restore — no folders, tags, or other filing structure. New-note capture is inline and mobile-first (built specifically around iOS's keyboard-focus constraints), and both creating and editing autosave with no explicit Save action. When the same note is open on two devices, updates are reconciled with simple last-write-wins semantics — a local device with unsaved changes keeps its own draft and is only notified, never silently overwritten — rather than building any document-merging infrastructure.
+
+### Why
+Notes exists to reduce cognitive load and capture household information (people's names, meal ideas, app feedback, miscellany) that doesn't deserve its own specialized system. Organization should not require upfront filing — pinning and search are enough until real usage proves otherwise. The app is currently a private two-person household app, so simple shared access is sufficient and per-user ownership would solve a problem that doesn't exist. Simplicity and low-friction daily use matter more than speculative extensibility.
+
+### Alternatives considered
+- Folders/collections or tags for organization.
+- Task-management features (due dates, reminders, priorities, statuses).
+- Per-user (private) notes instead of shared.
+- Spaces or other multi-household ownership model.
+- A rich-text editor instead of plain text.
+- AI-assisted organization/categorization.
+- Collaborative editing/merging infrastructure (real-time co-editing, conflict resolution beyond last-write-wins).
+
+### Revisit when
+Real usage creates organization problems that pinned/recent/search/archive don't solve; personal/private notes become a real need; Spaces becomes an actual product requirement; or concurrent-editing conflicts become common enough that last-write-wins causes real data loss or friction.
+
+---
+
 ## Maintenance Guidelines
 
 - Record only meaningful product or architectural decisions.

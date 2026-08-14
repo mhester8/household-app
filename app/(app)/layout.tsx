@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase/client";
 import SignInForm from "@/components/SignInForm";
@@ -61,12 +62,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="flex flex-1 flex-col items-center bg-page px-3 py-3 sm:px-6 sm:py-8">
       <main className="flex w-full max-w-md flex-col gap-1.5 sm:gap-3">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1 text-muted-foreground">
+          <Link href="/" className="flex items-center gap-1 text-muted-foreground">
             <LeafIcon className="h-3 w-3" />
             <p className="text-xs font-semibold uppercase tracking-[0.2em]">
               Hester House
             </p>
-          </div>
+          </Link>
           {session && (
             <button
               type="button"
