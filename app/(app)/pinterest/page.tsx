@@ -8,7 +8,14 @@ import { supabase } from "@/lib/supabase/client";
 type Status = "checking" | "not-connected" | "connecting" | "finishing" | "connected" | "error";
 
 type Board = { id: string; name: string };
-type Pin = { id: string; title: string | null; imageUrl: string | null; link: string | null };
+type Pin = {
+  id: string;
+  title: string | null;
+  description: string | null;
+  imageUrl: string | null;
+  extractionImageUrl: string | null;
+  link: string | null;
+};
 type PinsStatus = "idle" | "loading" | "loaded" | "loading-more" | "insufficient-scope" | "error";
 
 const PINTEREST_ERROR_MESSAGES: Record<string, string> = {
@@ -249,6 +256,29 @@ export default function PinterestPage() {
     router.push(`/recipes/import-url?${params.toString()}`);
   }
 
+  // For a Pin with no destination link, falls back to reading the Pin's own
+  // image instead — a different API/review page (/recipes/import-pin) since
+  // this is vision extraction from one image, not a page fetch. Nothing here
+  // saves a recipe; same hand-off shape as handleImportPin above, just to a
+  // different destination.
+  function handleImportPinImage(pin: Pin) {
+    const imageUrl = pin.extractionImageUrl ?? pin.imageUrl;
+    if (!imageUrl) {
+      return;
+    }
+    const params = new URLSearchParams({
+      imageUrl,
+      pinterestPinUrl: `https://www.pinterest.com/pin/${pin.id}/`,
+    });
+    if (pin.title) {
+      params.set("title", pin.title);
+    }
+    if (pin.description) {
+      params.set("description", pin.description);
+    }
+    router.push(`/recipes/import-pin?${params.toString()}`);
+  }
+
   return (
     <div className="flex flex-col gap-2 sm:gap-4">
       <div className="flex items-center gap-2">
@@ -398,19 +428,44 @@ export default function PinterestPage() {
                     );
 
                     if (!pin.link) {
+                      const hasImage = Boolean(pin.extractionImageUrl ?? pin.imageUrl);
+                      if (!hasImage) {
+                        return (
+                          <div
+                            key={pin.id}
+                            className="flex flex-col gap-1 overflow-hidden rounded-xl border border-border bg-surface-muted opacity-60"
+                          >
+                            {thumbnail}
+                            <div className="flex items-center justify-between gap-1 px-2 pb-2">
+                              {pin.title && <p className="text-xs text-foreground">{pin.title}</p>}
+                              <span className="shrink-0 rounded-full bg-surface px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                No link
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // No destination link, but there's an image to try
+                      // reading a recipe out of — routes to the vision
+                      // fallback instead of the URL importer.
                       return (
-                        <div
+                        <button
                           key={pin.id}
-                          className="flex flex-col gap-1 overflow-hidden rounded-xl border border-border bg-surface-muted opacity-60"
+                          type="button"
+                          onClick={() => handleImportPinImage(pin)}
+                          className="flex flex-col gap-1 overflow-hidden rounded-xl border border-border bg-surface-muted text-left transition hover:border-primary/40 active:bg-surface"
                         >
                           {thumbnail}
                           <div className="flex items-center justify-between gap-1 px-2 pb-2">
-                            {pin.title && <p className="text-xs text-foreground">{pin.title}</p>}
+                            <p className="min-w-0 flex-1 truncate text-xs text-foreground">
+                              {pin.title ?? "Try reading this Pin"}
+                            </p>
                             <span className="shrink-0 rounded-full bg-surface px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                               No link
                             </span>
                           </div>
-                        </div>
+                        </button>
                       );
                     }
 

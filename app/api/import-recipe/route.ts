@@ -2,16 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 import type { RecipeImportDraft } from "@/lib/recipes";
-import { dedupeAdjacentLines } from "@/lib/recipeImportDedup";
+import { runRecipeImportExtraction } from "@/lib/recipeImportModel";
 import { MAX_IMPORT_IMAGES, MAX_TOTAL_IMPORT_IMAGE_BYTES } from "@/lib/recipeImportLimits";
-
-// Kept as a single constant so it's a one-line swap after evaluating quality
-// vs. cost. gpt-5.6-terra is in the current GPT-5.6 line (confirmed as a
-// valid model identifier in the installed openai SDK's type definitions),
-// chosen over the -sol/-luna siblings and the plain flagship as the
-// starting point for strong image understanding on a recurring household
-// task without defaulting to the highest-cost model in the line.
-const IMPORT_MODEL = "gpt-5.6-terra";
 
 // The client compresses photos to well under 2MB before uploading; this is a
 // generous hard backstop against a client that skipped compression (e.g. a
@@ -22,53 +14,6 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 // browser can't compress (screenshots are already PNG and often small enough
 // to send as-is).
 const ACCEPTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
-// Coerces a model-provided time field to a non-negative integer number of
-// minutes, or null. Never trust the raw value blindly — a negative number,
-// a fraction, or a non-number all collapse to null rather than being
-// rejected outright, matching the leniency already used for title/servings.
-function sanitizeMinutes(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    return null;
-  }
-  return Math.round(value);
-}
-
-// Never trust the model's output shape blindly, even under strict mode —
-// coerce/trim/drop-empty so downstream code always sees clean data.
-function sanitizeDraft(value: unknown): RecipeImportDraft | null {
-  if (typeof value !== "object" || value === null) {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  const rawTitle = record.title;
-  const title = typeof rawTitle === "string" && rawTitle.trim() !== "" ? rawTitle.trim() : null;
-  const rawServings = record.servings;
-  const servings = typeof rawServings === "string" && rawServings.trim() !== "" ? rawServings.trim() : null;
-
-  if (!isStringArray(record.ingredients) || !isStringArray(record.steps) || !isStringArray(record.warnings)) {
-    return null;
-  }
-
-  return {
-    title,
-    ingredients: dedupeAdjacentLines(record.ingredients.map((line) => line.trim()).filter((line) => line !== "")),
-    steps: dedupeAdjacentLines(record.steps.map((line) => line.trim()).filter((line) => line !== "")),
-    warnings: record.warnings.map((line) => line.trim()).filter((line) => line !== ""),
-    servings,
-    prepTimeMinutes: sanitizeMinutes(record.prepTimeMinutes),
-    cookTimeMinutes: sanitizeMinutes(record.cookTimeMinutes),
-    totalTimeMinutes: sanitizeMinutes(record.totalTimeMinutes),
-    // Photos never carry a source-page image to extract — left null, same
-    // as the URL importer leaves it null when the source page has none.
-    imageUrl: null,
-  };
-}
 
 export async function POST(request: Request) {
   const authHeader = request.headers.get("authorization") ?? "";
@@ -152,9 +97,9 @@ export async function POST(request: Request) {
   let draft: RecipeImportDraft;
 
   try {
-    const response = await openai.responses.create({
-      model: IMPORT_MODEL,
-      input: [
+    draft = await runRecipeImportExtraction(
+      openai,
+      [
         {
           role: "system",
           content:
@@ -242,44 +187,10 @@ export async function POST(request: Request) {
           ],
         },
       ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "recipe_import_draft",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              title: { type: ["string", "null"] },
-              ingredients: { type: "array", items: { type: "string" } },
-              steps: { type: "array", items: { type: "string" } },
-              warnings: { type: "array", items: { type: "string" } },
-              servings: { type: ["string", "null"] },
-              prepTimeMinutes: { type: ["integer", "null"] },
-              cookTimeMinutes: { type: ["integer", "null"] },
-              totalTimeMinutes: { type: ["integer", "null"] },
-            },
-            required: [
-              "title",
-              "ingredients",
-              "steps",
-              "warnings",
-              "servings",
-              "prepTimeMinutes",
-              "cookTimeMinutes",
-              "totalTimeMinutes",
-            ],
-            additionalProperties: false,
-          },
-        },
-      },
-    });
-
-    const parsed = sanitizeDraft(JSON.parse(response.output_text));
-    if (!parsed) {
-      throw new Error("Malformed structured output from recipe import");
-    }
-    draft = parsed;
+      // Photos never carry a source-page image to extract — null, same as
+      // the URL importer leaves it null when the source page has none.
+      null
+    );
   } catch (err) {
     console.error("OpenAI recipe import failed:", err);
     return NextResponse.json(

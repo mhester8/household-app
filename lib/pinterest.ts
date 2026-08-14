@@ -293,11 +293,35 @@ export function isValidPinterestId(value: string): boolean {
   return PINTEREST_ID_PATTERN.test(value);
 }
 
-export type PinterestPinSummary = { id: string; title: string | null; imageUrl: string | null; link: string | null };
+export type PinterestPinSummary = {
+  id: string;
+  title: string | null;
+  // Pinterest's own caption/description field, distinct from title — useful
+  // context for the image-import fallback (see /api/import-recipe-pin) but
+  // never itself a source of ingredients/steps.
+  description: string | null;
+  imageUrl: string | null;
+  // A larger rendition of the same image than `imageUrl`, used only when a
+  // link-less Pin is sent to the vision importer — the grid thumbnail is
+  // deliberately small and isn't sharp enough to read printed recipe text
+  // off of. Falls back to `imageUrl` itself when no larger size is present.
+  extractionImageUrl: string | null;
+  link: string | null;
+};
 
 export type BoardPinsResult =
   | { ok: true; pins: PinterestPinSummary[]; nextBookmark: string | null }
   | { ok: false; status: number };
+
+function firstImageUrl(record: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const entry = record[key];
+    if (entry && typeof entry === "object" && typeof (entry as { url?: unknown }).url === "string") {
+      return (entry as { url: string }).url;
+    }
+  }
+  return null;
+}
 
 // Picks one reasonable thumbnail size for a grid — this milestone only
 // needs enough to identify a Pin, not the full-resolution image, and there's
@@ -307,17 +331,45 @@ function pickThumbnailUrl(images: unknown): string | null {
     return null;
   }
   const record = images as Record<string, unknown>;
-  for (const key of ["400x300", "150x150"]) {
-    const entry = record[key];
-    if (entry && typeof entry === "object" && typeof (entry as { url?: unknown }).url === "string") {
-      return (entry as { url: string }).url;
-    }
+  const picked = firstImageUrl(record, ["400x300", "150x150"]);
+  if (picked) {
+    return picked;
   }
   const firstEntry = Object.values(record)[0];
   if (firstEntry && typeof firstEntry === "object" && typeof (firstEntry as { url?: unknown }).url === "string") {
     return (firstEntry as { url: string }).url;
   }
   return null;
+}
+
+// Picks the largest available rendition for feeding to the vision model —
+// legible ingredient/step text needs real resolution, unlike the grid
+// thumbnail. Falls back through progressively smaller sizes, then to
+// whatever pickThumbnailUrl would have picked, so this never fails to
+// return something as long as the Pin has any image at all.
+function pickExtractionImageUrl(images: unknown, thumbnailUrl: string | null): string | null {
+  if (typeof images !== "object" || images === null) {
+    return thumbnailUrl;
+  }
+  const record = images as Record<string, unknown>;
+  return firstImageUrl(record, ["orig", "1200x", "600x", "600x315"]) ?? thumbnailUrl;
+}
+
+// Defense-in-depth check applied right before a Pin image URL is ever sent
+// on to OpenAI (see /api/import-recipe-pin): Pinterest's own API is the only
+// source of these URLs today, but this guards against a future bug or an
+// unexpected response shape quietly turning into "send an arbitrary URL to
+// a third party." Exact-hostname match, not a suffix check, so it can't be
+// satisfied by an attacker-controlled subdomain like "i.pinimg.com.evil.com".
+const PINTEREST_IMAGE_CDN_HOSTNAME = "i.pinimg.com";
+
+export function isPinterestImageCdnUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && parsed.hostname === PINTEREST_IMAGE_CDN_HOSTNAME;
+  } catch {
+    return false;
+  }
 }
 
 export async function fetchPinterestBoardPins(
@@ -345,24 +397,43 @@ export async function fetchPinterestBoardPins(
 
   try {
     const body = (await response.json()) as {
-      items?: Array<{ id?: unknown; title?: unknown; link?: unknown; media?: { images?: unknown } }>;
+      items?: Array<{
+        id?: unknown;
+        title?: unknown;
+        description?: unknown;
+        link?: unknown;
+        media?: { images?: unknown };
+      }>;
       bookmark?: unknown;
     };
     const pins = (body.items ?? [])
       .filter(
-        (item): item is { id: string; title?: unknown; link?: unknown; media?: { images?: unknown } } =>
-          typeof item.id === "string"
+        (
+          item
+        ): item is {
+          id: string;
+          title?: unknown;
+          description?: unknown;
+          link?: unknown;
+          media?: { images?: unknown };
+        } => typeof item.id === "string"
       )
-      .map((item) => ({
-        id: item.id,
-        title: typeof item.title === "string" && item.title.trim() !== "" ? item.title : null,
-        imageUrl: pickThumbnailUrl(item.media?.images),
-        // Not trusted as inherently safe just because it came from Pinterest
-        // — passed through unmodified to the existing recipe URL importer,
-        // which applies the same isFetchableUrl check and server-side
-        // SSRF-safe fetch it already applies to a manually typed URL.
-        link: typeof item.link === "string" && item.link.trim() !== "" ? item.link : null,
-      }));
+      .map((item) => {
+        const thumbnailUrl = pickThumbnailUrl(item.media?.images);
+        return {
+          id: item.id,
+          title: typeof item.title === "string" && item.title.trim() !== "" ? item.title : null,
+          description:
+            typeof item.description === "string" && item.description.trim() !== "" ? item.description : null,
+          imageUrl: thumbnailUrl,
+          extractionImageUrl: pickExtractionImageUrl(item.media?.images, thumbnailUrl),
+          // Not trusted as inherently safe just because it came from Pinterest
+          // — passed through unmodified to the existing recipe URL importer,
+          // which applies the same isFetchableUrl check and server-side
+          // SSRF-safe fetch it already applies to a manually typed URL.
+          link: typeof item.link === "string" && item.link.trim() !== "" ? item.link : null,
+        };
+      });
     const nextBookmark = typeof body.bookmark === "string" ? body.bookmark : null;
     return { ok: true, pins, nextBookmark };
   } catch {
