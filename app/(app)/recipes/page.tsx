@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import { sortRecipesByCreatedAt, type Recipe } from "@/lib/recipes";
-import { cardMetadataLine } from "@/lib/recipeCardMeta";
-import { RecipeRow } from "@/components/RecipeRow";
+import { gridCardMetadataLine } from "@/lib/recipeCardMeta";
+import { RecipeCard } from "@/components/RecipeCard";
 
 // Ingredient texts are kept per-recipe for the search box (title-or-
 // ingredient matching below) — the ingredient count itself is no longer
@@ -234,9 +234,9 @@ export default function RecipesPage() {
             />
           )}
 
-          <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
+          <ul className="grid grid-cols-2 gap-2.5">
             {filteredRecipes.map((recipe) => {
-              const metadata = cardMetadataLine(
+              const metadata = gridCardMetadataLine(
                 {
                   prepTimeMinutes: recipe.prep_time_minutes,
                   cookTimeMinutes: recipe.cook_time_minutes,
@@ -246,7 +246,7 @@ export default function RecipesPage() {
               );
               return (
                 <li key={recipe.id}>
-                  <RecipeRow
+                  <RecipeCard
                     href={`/recipes/${recipe.id}`}
                     title={recipe.title}
                     imageUrl={recipe.image_url}
@@ -256,12 +256,12 @@ export default function RecipesPage() {
               );
             })}
             {recipes.length === 0 && (
-              <li className="px-1 py-6 text-center text-sm text-muted-foreground">
+              <li className="col-span-2 px-1 py-6 text-center text-sm text-muted-foreground">
                 No recipes yet. Add one to get started.
               </li>
             )}
             {recipes.length > 0 && filteredRecipes.length === 0 && (
-              <li className="px-1 py-6 text-center text-sm text-muted-foreground">
+              <li className="col-span-2 px-1 py-6 text-center text-sm text-muted-foreground">
                 No recipes match &ldquo;{searchQuery.trim()}&rdquo;.
               </li>
             )}

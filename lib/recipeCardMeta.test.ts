@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatServingsLabel, cardMetadataLine } from "./recipeCardMeta.ts";
+import { formatServingsLabel, cardMetadataLine, gridCardMetadataLine } from "./recipeCardMeta.ts";
 
 const NO_TIME = { prepTimeMinutes: null, cookTimeMinutes: null, totalTimeMinutes: null };
 
@@ -89,4 +89,49 @@ test("cardMetadataLine never leaves a stray separator with only one side present
 test("cardMetadataLine passes non-numeric yield text through unchanged alongside time", () => {
   const line = cardMetadataLine({ ...NO_TIME, totalTimeMinutes: 30 }, "Makes 12 muffins");
   assert.equal(line, "30 min · Makes 12 muffins");
+});
+
+test("gridCardMetadataLine prefers total time, unlabeled", () => {
+  assert.equal(gridCardMetadataLine({ ...NO_TIME, totalTimeMinutes: 45 }, "6"), "45 min · Serves 6");
+  assert.equal(gridCardMetadataLine({ ...NO_TIME, totalTimeMinutes: 80 }, null), "1 hr 20 min");
+});
+
+test("gridCardMetadataLine sums prep + cook into one bare duration when total is unknown", () => {
+  const line = gridCardMetadataLine({ prepTimeMinutes: 20, cookTimeMinutes: 30, totalTimeMinutes: null }, "6");
+  assert.equal(line, "50 min · Serves 6");
+});
+
+test("gridCardMetadataLine sums prep + cook across an hour boundary", () => {
+  const line = gridCardMetadataLine({ prepTimeMinutes: 45, cookTimeMinutes: 45, totalTimeMinutes: null }, null);
+  assert.equal(line, "1 hr 30 min");
+});
+
+test("gridCardMetadataLine falls back to labeled Prep alone when only prep is known", () => {
+  const line = gridCardMetadataLine({ prepTimeMinutes: 20, cookTimeMinutes: null, totalTimeMinutes: null }, "4");
+  assert.equal(line, "Prep 20 min · Serves 4");
+});
+
+test("gridCardMetadataLine falls back to labeled Cook alone when only cook is known", () => {
+  const line = gridCardMetadataLine({ prepTimeMinutes: null, cookTimeMinutes: 30, totalTimeMinutes: null }, null);
+  assert.equal(line, "Cook 30 min");
+});
+
+test("gridCardMetadataLine passes non-numeric servings text through unchanged", () => {
+  const line = gridCardMetadataLine({ ...NO_TIME, totalTimeMinutes: 25 }, "8 bowls");
+  assert.equal(line, "25 min · 8 bowls");
+});
+
+test("gridCardMetadataLine returns null when nothing is known", () => {
+  assert.equal(gridCardMetadataLine(NO_TIME, null), null);
+  assert.equal(gridCardMetadataLine(NO_TIME, ""), null);
+});
+
+test("gridCardMetadataLine never leaves a stray separator with only one side present", () => {
+  const timeOnly = gridCardMetadataLine({ ...NO_TIME, totalTimeMinutes: 10 }, "");
+  assert.equal(timeOnly, "10 min");
+  assert.ok(!timeOnly?.includes("·"));
+
+  const servingsOnly = gridCardMetadataLine(NO_TIME, "Serves 2");
+  assert.equal(servingsOnly, "Serves 2");
+  assert.ok(!servingsOnly?.includes("·"));
 });

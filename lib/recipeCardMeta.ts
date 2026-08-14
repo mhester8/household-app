@@ -1,10 +1,10 @@
-// Small shared formatter for the Recipe Library card's compact metadata
-// line (time + servings). Kept separate from recipeTime.ts because it
-// combines two independent domains — duration formatting and free-text
-// servings — into one presentation-only string for a single call site (the
-// library list row), rather than being general duration logic itself. No
-// Supabase/Next.js imports, so this stays testable with plain Node, same
-// as recipeTime.ts.
+// Small shared formatters for the Recipe Library's compact metadata line
+// (time + servings) — one for the list row, one for the narrower grid card.
+// Kept separate from recipeTime.ts because they combine two independent
+// domains — duration formatting and free-text servings — into a
+// presentation-only string for the library page specifically, rather than
+// being general duration logic itself. No Supabase/Next.js imports, so
+// this stays testable with plain Node, same as recipeTime.ts.
 
 import { formatDuration, type RecipeTimes } from "./recipeTime.ts";
 
@@ -47,6 +47,39 @@ export function cardMetadataLine(times: RecipeTimes, servings: string | null): s
       (part): part is string => Boolean(part)
     );
     timeText = labeled.length > 0 ? labeled.join(" · ") : null;
+  }
+
+  const servingsText = formatServingsLabel(servings);
+
+  return (
+    [timeText, servingsText].filter((part): part is string => Boolean(part)).join(" · ") || null
+  );
+}
+
+// Recipe Library grid card: same idea as cardMetadataLine, but for the
+// narrower ~160-170px 2-column card width, where a labeled "Prep 20 min ·
+// Cook 30 min · Serves 6" line doesn't fit — it would truncate and silently
+// drop the servings count. When total is unknown but both prep and cook
+// are, this sums them into one bare duration ("50 min") instead of showing
+// both as separate labeled segments, trading away the prep/cook breakdown
+// for a line that reliably fits alongside servings. Prep-only/cook-only
+// still show their label, since a bare duration alone would be ambiguous.
+export function gridCardMetadataLine(times: RecipeTimes, servings: string | null): string | null {
+  const total = formatDuration(times.totalTimeMinutes);
+  const prep = formatDuration(times.prepTimeMinutes);
+  const cook = formatDuration(times.cookTimeMinutes);
+
+  let timeText: string | null;
+  if (total) {
+    timeText = total;
+  } else if (prep && cook) {
+    timeText = formatDuration((times.prepTimeMinutes ?? 0) + (times.cookTimeMinutes ?? 0));
+  } else if (prep) {
+    timeText = `Prep ${prep}`;
+  } else if (cook) {
+    timeText = `Cook ${cook}`;
+  } else {
+    timeText = null;
   }
 
   const servingsText = formatServingsLabel(servings);
