@@ -8,9 +8,17 @@ export const PINTEREST_AUTHORIZE_URL = "https://www.pinterest.com/oauth/";
 export const PINTEREST_TOKEN_URL = "https://api.pinterest.com/v5/oauth/token";
 export const PINTEREST_BOARDS_URL = "https://api.pinterest.com/v5/boards";
 
-// Read-only, board-listing scope only for this milestone — no
-// user_accounts:read (we don't call /v5/user_account), no pins:read.
-export const PINTEREST_SCOPES = "boards:read";
+// Read-only board- and pin-listing scopes. Still no user_accounts:read (we
+// don't call /v5/user_account). Pinterest's scope param is comma-separated,
+// not space-separated like standard OAuth — confirmed from Pinterest's own
+// example authorize URLs.
+//
+// Connections made before pins:read was added were authorized with
+// boards:read only. A refresh can never widen a token's scope (Pinterest's
+// refresh grant only narrows it), so those connections must reconnect once
+// to pick up pins:read — see the insufficient_scope handling in
+// fetchPinterestBoardPins/the boards/[boardId]/pins route.
+export const PINTEREST_SCOPES = "boards:read,pins:read";
 
 // Both OAuth cookies are scoped to this path so they're never sent on
 // unrelated requests, and both are cleared once consumed.
@@ -271,6 +279,92 @@ export async function fetchPinterestBoards(accessToken: string): Promise<BoardsR
       .filter((item): item is { id: string; name: string } => typeof item.id === "string" && typeof item.name === "string")
       .map((item) => ({ id: item.id, name: item.name }));
     return { ok: true, boards };
+  } catch {
+    return { ok: false, status: 502 };
+  }
+}
+
+// Pinterest board and Pin ids are numeric strings. Validating this before
+// ever interpolating the value into a URL means an unexpected value 400s
+// immediately instead of being sent on to Pinterest as part of a request path.
+const PINTEREST_ID_PATTERN = /^\d{1,32}$/;
+
+export function isValidPinterestId(value: string): boolean {
+  return PINTEREST_ID_PATTERN.test(value);
+}
+
+export type PinterestPinSummary = { id: string; title: string | null; imageUrl: string | null; link: string | null };
+
+export type BoardPinsResult =
+  | { ok: true; pins: PinterestPinSummary[]; nextBookmark: string | null }
+  | { ok: false; status: number };
+
+// Picks one reasonable thumbnail size for a grid — this milestone only
+// needs enough to identify a Pin, not the full-resolution image, and there's
+// no image caching/storage involved (Pinterest's own CDN URL is used as-is).
+function pickThumbnailUrl(images: unknown): string | null {
+  if (typeof images !== "object" || images === null) {
+    return null;
+  }
+  const record = images as Record<string, unknown>;
+  for (const key of ["400x300", "150x150"]) {
+    const entry = record[key];
+    if (entry && typeof entry === "object" && typeof (entry as { url?: unknown }).url === "string") {
+      return (entry as { url: string }).url;
+    }
+  }
+  const firstEntry = Object.values(record)[0];
+  if (firstEntry && typeof firstEntry === "object" && typeof (firstEntry as { url?: unknown }).url === "string") {
+    return (firstEntry as { url: string }).url;
+  }
+  return null;
+}
+
+export async function fetchPinterestBoardPins(
+  accessToken: string,
+  boardId: string,
+  bookmark: string | null
+): Promise<BoardPinsResult> {
+  const url = new URL(`${PINTEREST_BOARDS_URL}/${boardId}/pins`);
+  if (bookmark) {
+    url.searchParams.set("bookmark", bookmark);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  } catch {
+    return { ok: false, status: 502 };
+  }
+
+  if (!response.ok) {
+    return { ok: false, status: response.status };
+  }
+
+  try {
+    const body = (await response.json()) as {
+      items?: Array<{ id?: unknown; title?: unknown; link?: unknown; media?: { images?: unknown } }>;
+      bookmark?: unknown;
+    };
+    const pins = (body.items ?? [])
+      .filter(
+        (item): item is { id: string; title?: unknown; link?: unknown; media?: { images?: unknown } } =>
+          typeof item.id === "string"
+      )
+      .map((item) => ({
+        id: item.id,
+        title: typeof item.title === "string" && item.title.trim() !== "" ? item.title : null,
+        imageUrl: pickThumbnailUrl(item.media?.images),
+        // Not trusted as inherently safe just because it came from Pinterest
+        // — passed through unmodified to the existing recipe URL importer,
+        // which applies the same isFetchableUrl check and server-side
+        // SSRF-safe fetch it already applies to a manually typed URL.
+        link: typeof item.link === "string" && item.link.trim() !== "" ? item.link : null,
+      }));
+    const nextBookmark = typeof body.bookmark === "string" ? body.bookmark : null;
+    return { ok: true, pins, nextBookmark };
   } catch {
     return { ok: false, status: 502 };
   }

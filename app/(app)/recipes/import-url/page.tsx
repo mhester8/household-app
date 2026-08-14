@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
@@ -30,14 +30,16 @@ export default function ImportRecipeFromUrlPage() {
   // in flight — same mutex shape as the photo importer's extraction guard.
   const isExtractingRef = useRef(false);
   const savedRecipeIdRef = useRef<string | null>(null);
+  const hasAutoImportedRef = useRef(false);
 
-  async function handleImport(event: React.FormEvent) {
-    event.preventDefault();
+  // Shared by the manual form submit and the Pinterest hand-off (a Pin's
+  // destination URL arrives via ?url= and is run through this exact same
+  // path — no special-casing for where the URL came from).
+  async function runImport(trimmedUrl: string) {
     if (isExtractingRef.current) {
       return;
     }
 
-    const trimmedUrl = url.trim();
     if (!isFetchableUrl(trimmedUrl)) {
       setStep("error");
       setErrorMessage("That doesn't look like a valid web address.");
@@ -91,6 +93,38 @@ export default function ImportRecipeFromUrlPage() {
       isExtractingRef.current = false;
     }
   }
+
+  async function handleImport(event: React.FormEvent) {
+    event.preventDefault();
+    await runImport(url.trim());
+  }
+
+  // If a URL arrives via ?url= (currently only the Pinterest Pin hand-off),
+  // prefill and run the same extraction a manual submit would — the user
+  // still lands on the draft/review form and still has to click Save
+  // explicitly, same as typing a URL in by hand. Runs once; an invalid or
+  // missing param is silently ignored rather than shown as an error, since
+  // it isn't something the user typed.
+  useEffect(() => {
+    if (hasAutoImportedRef.current) {
+      return;
+    }
+    hasAutoImportedRef.current = true;
+
+    async function autoImportFromParam() {
+      const paramUrl = new URLSearchParams(window.location.search).get("url");
+      if (!paramUrl || !isFetchableUrl(paramUrl)) {
+        return;
+      }
+
+      router.replace("/recipes/import-url");
+      setUrl(paramUrl);
+      await runImport(paramUrl);
+    }
+
+    autoImportFromParam();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleSave(input: RecipeSaveInput): Promise<string | null> {
     // RecipeForm has no image field of its own (Phase 2) — the draft's
