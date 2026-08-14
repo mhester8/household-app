@@ -18,11 +18,22 @@ const INFO_TOAST_MS = 3000;
 
 export type IngredientReviewLine = {
   id: string;
+  // The text actually used for duplicate/pantry-basic matching and for the
+  // grocery item name if added — this is the (possibly desired-servings-
+  // scaled) display text, never the recipe's own stored ingredient row.
   text: string;
   // Recipe title, when reviewing ingredients pooled from more than one
   // recipe (This Week). Left undefined for a single-recipe review, which
   // renders as one flat list with no group headers.
   groupLabel?: string;
+  // Set only on the first line of a scaled recipe's group (This Week) — a
+  // short note shown under the group label, e.g. "Scaled from 6 to 4
+  // servings. Review quantities before adding."
+  groupNote?: string;
+  // Present only when `text` is a scaled rewrite of the recipe's stored
+  // ingredient line — shown as small muted secondary text so the scaling
+  // math stays checkable instead of silently trusted.
+  originalText?: string;
 };
 
 // Groups consecutive lines sharing the same groupLabel, preserving the order
@@ -406,9 +417,14 @@ export function IngredientReviewPanel({
             {groupLines(lines).map((group, index) => (
               <div key={group.label ?? `ungrouped-${index}`} className="flex flex-col gap-1">
                 {group.label && (
-                  <span className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {group.label}
-                  </span>
+                  <div className="flex flex-col gap-0.5 px-1">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {group.label}
+                    </span>
+                    {group.lines[0]?.groupNote && (
+                      <span className="text-xs text-muted-foreground">{group.lines[0].groupNote}</span>
+                    )}
+                  </div>
                 )}
                 <ul className="flex flex-col gap-1">
                   {group.lines.map((line) => {
@@ -428,7 +444,12 @@ export function IngredientReviewPanel({
                             onChange={() => toggle(line.id)}
                             className="h-5 w-5 shrink-0 rounded border-border/80 text-primary focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                           />
-                          <span className="min-w-0 flex-1 break-words">{line.text}</span>
+                          <span className="min-w-0 flex-1 break-words">
+                            {line.text}
+                            {line.originalText && (
+                              <span className="block text-xs text-muted-foreground">from {line.originalText}</span>
+                            )}
+                          </span>
                           {isDuplicate && (
                             <span className="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                               Already on list

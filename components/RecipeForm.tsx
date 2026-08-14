@@ -167,25 +167,35 @@ export function RecipeForm({
       )}
 
       <form onSubmit={handleSave} className="flex flex-col gap-4">
-        <input
-          type="text"
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          placeholder="Recipe title"
-          aria-label="Recipe title"
-          autoComplete="off"
-          className="min-h-11 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-        />
+        <div className="flex flex-col gap-1">
+          <label htmlFor="recipe-title" className="px-1 text-xs font-medium text-muted-foreground">
+            Title
+          </label>
+          <input
+            id="recipe-title"
+            type="text"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Recipe title"
+            autoComplete="off"
+            className="min-h-11 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
 
-        <input
-          type="text"
-          value={servings}
-          onChange={(event) => setServings(event.target.value)}
-          placeholder="Servings / Yield (optional, e.g. Serves 6)"
-          aria-label="Servings / Yield"
-          autoComplete="off"
-          className="min-h-11 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-        />
+        <div className="flex flex-col gap-1">
+          <label htmlFor="recipe-servings" className="px-1 text-xs font-medium text-muted-foreground">
+            Servings / Yield
+          </label>
+          <input
+            id="recipe-servings"
+            type="text"
+            value={servings}
+            onChange={(event) => setServings(event.target.value)}
+            placeholder="Optional, e.g. Serves 6"
+            autoComplete="off"
+            className="min-h-11 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
 
         <div className="flex flex-col gap-2">
           <span className="text-sm font-semibold text-foreground">Time (optional)</span>
