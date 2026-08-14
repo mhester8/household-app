@@ -16,6 +16,7 @@ import type { ThisWeekRecipe } from "@/lib/thisWeek";
 import { IngredientReviewPanel, type IngredientReviewLine } from "@/components/IngredientReviewPanel";
 import { Toast, type ToastState } from "@/components/Toast";
 import { detailTimeSegments } from "@/lib/recipeTime";
+import { deleteRecipeImageIfOwned } from "@/lib/recipeImages";
 
 // Matches the toast durations used on the groceries page for the same tone.
 const ERROR_TOAST_MS = 6000;
@@ -227,6 +228,13 @@ export default function RecipeDetailPage() {
       setDeleteError(error.message);
       setIsDeleting(false);
       return;
+    }
+
+    // Best-effort — a no-op unless this recipe's image was one of our own
+    // uploads, and never allowed to block navigation away from the
+    // now-deleted recipe.
+    if (recipe) {
+      await deleteRecipeImageIfOwned(supabase, recipe.image_url);
     }
 
     router.push("/recipes");

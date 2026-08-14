@@ -6,6 +6,8 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import { sortByPosition } from "@/lib/recipes";
 import { RecipeForm, type RecipeDraftLine, type RecipeSaveInput } from "@/components/RecipeForm";
+import { RecipeImageField } from "@/components/RecipeImageField";
+import { deleteRecipeImageIfOwned, uploadRecipeImage } from "@/lib/recipeImages";
 
 export default function EditRecipePage() {
   const params = useParams<{ id: string }>();
@@ -20,6 +22,8 @@ export default function EditRecipePage() {
   const [totalTimeMinutes, setTotalTimeMinutes] = useState<number | null>(null);
   const [ingredients, setIngredients] = useState<RecipeDraftLine[] | null>(null);
   const [steps, setSteps] = useState<RecipeDraftLine[] | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -31,7 +35,9 @@ export default function EditRecipePage() {
       const [recipeResult, ingredientsResult, stepsResult] = await Promise.all([
         supabase
           .from("recipes")
-          .select("id, title, source_url, notes, servings, prep_time_minutes, cook_time_minutes, total_time_minutes")
+          .select(
+            "id, title, source_url, notes, servings, prep_time_minutes, cook_time_minutes, total_time_minutes, image_url"
+          )
           .eq("id", recipeId)
           .maybeSingle(),
         supabase.from("recipe_ingredients").select("position, text").eq("recipe_id", recipeId),
@@ -56,6 +62,7 @@ export default function EditRecipePage() {
       setPrepTimeMinutes(recipeResult.data.prep_time_minutes ?? null);
       setCookTimeMinutes(recipeResult.data.cook_time_minutes ?? null);
       setTotalTimeMinutes(recipeResult.data.total_time_minutes ?? null);
+      setImageUrl(recipeResult.data.image_url ?? null);
       setIngredients(
         sortByPosition(ingredientsResult.data ?? []).map((row) => ({
           key: crypto.randomUUID(),
@@ -78,6 +85,18 @@ export default function EditRecipePage() {
   // the whole set here (delete then reinsert in the new order) is safe —
   // same approach as the workout template edit flow.
   async function handleSave(input: RecipeSaveInput): Promise<string | null> {
+    let nextImageUrl = imageUrl;
+
+    // Upload before touching the recipe row at all — if this fails, the
+    // recipe and its current image are left completely untouched.
+    if (selectedImageFile) {
+      const uploadResult = await uploadRecipeImage(supabase, recipeId, selectedImageFile);
+      if (uploadResult.error) {
+        return uploadResult.error;
+      }
+      nextImageUrl = uploadResult.publicUrl;
+    }
+
     const { error: recipeError } = await supabase
       .from("recipes")
       .update({
@@ -88,11 +107,19 @@ export default function EditRecipePage() {
         prep_time_minutes: input.prepTimeMinutes,
         cook_time_minutes: input.cookTimeMinutes,
         total_time_minutes: input.totalTimeMinutes,
+        image_url: nextImageUrl,
       })
       .eq("id", recipeId);
 
     if (recipeError) {
       return `Couldn't save recipe: ${recipeError.message}`;
+    }
+
+    // Only now that the new image is safely referenced by the recipe row,
+    // clean up the old one — a no-op unless it was one of our own uploads
+    // (never an external recipe-site image).
+    if (selectedImageFile) {
+      await deleteRecipeImageIfOwned(supabase, imageUrl);
     }
 
     const [deleteIngredientsResult, deleteStepsResult] = await Promise.all([
@@ -146,19 +173,22 @@ export default function EditRecipePage() {
           {loadError ?? "Recipe not found."}
         </p>
       ) : (
-        <RecipeForm
-          initialTitle={title}
-          initialSourceUrl={sourceUrl}
-          initialNotes={notes}
-          initialServings={servings}
-          initialPrepTimeMinutes={prepTimeMinutes}
-          initialCookTimeMinutes={cookTimeMinutes}
-          initialTotalTimeMinutes={totalTimeMinutes}
-          initialIngredients={ingredients}
-          initialSteps={steps}
-          saveLabel="Save Changes"
-          onSave={handleSave}
-        />
+        <>
+          <RecipeImageField currentImageUrl={imageUrl} onFileSelected={setSelectedImageFile} />
+          <RecipeForm
+            initialTitle={title}
+            initialSourceUrl={sourceUrl}
+            initialNotes={notes}
+            initialServings={servings}
+            initialPrepTimeMinutes={prepTimeMinutes}
+            initialCookTimeMinutes={cookTimeMinutes}
+            initialTotalTimeMinutes={totalTimeMinutes}
+            initialIngredients={ingredients}
+            initialSteps={steps}
+            saveLabel="Save Changes"
+            onSave={handleSave}
+          />
+        </>
       )}
     </div>
   );
