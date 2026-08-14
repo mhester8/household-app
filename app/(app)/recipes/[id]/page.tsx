@@ -58,7 +58,7 @@ export default function RecipeDetailPage() {
         supabase
           .from("recipes")
           .select(
-            "id, title, source_url, notes, servings, prep_time_minutes, cook_time_minutes, total_time_minutes, image_url, created_at"
+            "id, title, source_url, notes, servings, prep_time_minutes, cook_time_minutes, total_time_minutes, image_url, pinterest_pin_url, created_at"
           )
           .eq("id", recipeId)
           .maybeSingle(),
@@ -405,6 +405,17 @@ export default function RecipeDetailPage() {
               className="break-words text-sm text-primary underline underline-offset-2"
             >
               {recipe.source_url}
+            </a>
+          )}
+
+          {recipe.pinterest_pin_url && (
+            <a
+              href={recipe.pinterest_pin_url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-xs text-muted-foreground underline underline-offset-2"
+            >
+              Found via Pinterest
             </a>
           )}
 

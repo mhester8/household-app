@@ -235,22 +235,28 @@ export default function PinterestPage() {
 
   // Hands the Pin's destination URL to the existing recipe URL importer —
   // that route does the actual fetch/parsing and still lands the user on the
-  // normal draft/review form; nothing here saves a recipe.
+  // normal draft/review form; nothing here saves a recipe. Also carries the
+  // Pin's own permalink (deterministic from its id — no extra Pinterest API
+  // field needed) as separate provenance, distinct from the destination URL.
   function handleImportPin(pin: Pin) {
     if (!pin.link) {
       return;
     }
-    router.push(`/recipes/import-url?url=${encodeURIComponent(pin.link)}`);
+    const params = new URLSearchParams({
+      url: pin.link,
+      pinterestPinUrl: `https://www.pinterest.com/pin/${pin.id}/`,
+    });
+    router.push(`/recipes/import-url?${params.toString()}`);
   }
 
   return (
     <div className="flex flex-col gap-2 sm:gap-4">
       <div className="flex items-center gap-2">
         <Link
-          href="/"
+          href="/recipes"
           className="shrink-0 rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
         >
-          &lsaquo; Home
+          &lsaquo; Recipes
         </Link>
         <h1 className="text-xl font-bold tracking-tight text-primary">Pinterest</h1>
       </div>

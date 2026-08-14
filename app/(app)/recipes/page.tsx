@@ -204,6 +204,12 @@ export default function RecipesPage() {
               >
                 From URL
               </Link>
+              <Link
+                href="/pinterest"
+                className="min-h-11 flex items-center justify-center rounded-xl bg-surface-muted px-4 text-base font-medium text-foreground transition hover:bg-border"
+              >
+                From Pinterest
+              </Link>
               <button
                 type="button"
                 onClick={() => setIsChoosingRecipeType(false)}

@@ -25,6 +25,9 @@ export default function ImportRecipeFromUrlPage() {
   const [url, setUrl] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [draft, setDraft] = useState<RecipeImportDraft | null>(null);
+  // Set only via ?pinterestPinUrl= (the Pinterest hand-off); never shown or
+  // editable in RecipeForm — just carried through to the save call.
+  const [pinterestPinUrl, setPinterestPinUrl] = useState<string | null>(null);
 
   // Guards against a second extraction request firing while one is already
   // in flight — same mutex shape as the photo importer's extraction guard.
@@ -112,13 +115,19 @@ export default function ImportRecipeFromUrlPage() {
     hasAutoImportedRef.current = true;
 
     async function autoImportFromParam() {
-      const paramUrl = new URLSearchParams(window.location.search).get("url");
+      const searchParams = new URLSearchParams(window.location.search);
+      const paramUrl = searchParams.get("url");
       if (!paramUrl || !isFetchableUrl(paramUrl)) {
         return;
       }
 
+      const paramPinterestPinUrl = searchParams.get("pinterestPinUrl");
+
       router.replace("/recipes/import-url");
       setUrl(paramUrl);
+      if (paramPinterestPinUrl && isFetchableUrl(paramPinterestPinUrl)) {
+        setPinterestPinUrl(paramPinterestPinUrl);
+      }
       await runImport(paramUrl);
     }
 
@@ -130,7 +139,7 @@ export default function ImportRecipeFromUrlPage() {
     // RecipeForm has no image field of its own (Phase 2) — the draft's
     // JSON-LD-derived image is merged in here, at the one call site that
     // has it, rather than threading it through RecipeForm's generic input.
-    const { id, error } = await createRecipe({ ...input, imageUrl: draft?.imageUrl ?? null });
+    const { id, error } = await createRecipe({ ...input, imageUrl: draft?.imageUrl ?? null, pinterestPinUrl });
     if (error) {
       return error;
     }

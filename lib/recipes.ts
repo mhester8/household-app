@@ -10,6 +10,12 @@ export type Recipe = {
   cook_time_minutes: number | null;
   total_time_minutes: number | null;
   image_url: string | null;
+  // The Pinterest Pin the recipe was discovered/imported through — distinct
+  // from source_url, which is the recipe website itself. Null for manual
+  // recipes and normal (non-Pinterest) URL imports. Optional (not just
+  // nullable) because the recipes list query deliberately doesn't select
+  // it — only the detail page, which actually displays it, does.
+  pinterest_pin_url?: string | null;
   created_at: string;
 };
 
@@ -70,6 +76,10 @@ export type RecipeSaveInput = {
   // draft's JSON-LD-derived image. `createRecipe` treats "omitted" the
   // same as null.
   imageUrl?: string | null;
+  // Set only when the URL importer was reached via a Pinterest Pin (see
+  // /recipes/import-url's ?pinterestPinUrl= handling). Omitted by every
+  // other save path.
+  pinterestPinUrl?: string | null;
 };
 
 // Shape returned by POST /api/import-recipe and /api/import-recipe-url — a
@@ -137,6 +147,11 @@ export async function createRecipe(
       cook_time_minutes: input.cookTimeMinutes,
       total_time_minutes: input.totalTimeMinutes,
       image_url: input.imageUrl ?? null,
+      // Only referenced when actually set, so a normal manual/URL-import
+      // save (the vast majority of writes) never touches this column —
+      // only a Pinterest-originated save requires the pinterest_pin_url
+      // column to already exist.
+      ...(input.pinterestPinUrl ? { pinterest_pin_url: input.pinterestPinUrl } : {}),
     })
     .select("id")
     .single();
