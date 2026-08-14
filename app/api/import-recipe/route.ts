@@ -64,6 +64,9 @@ function sanitizeDraft(value: unknown): RecipeImportDraft | null {
     prepTimeMinutes: sanitizeMinutes(record.prepTimeMinutes),
     cookTimeMinutes: sanitizeMinutes(record.cookTimeMinutes),
     totalTimeMinutes: sanitizeMinutes(record.totalTimeMinutes),
+    // Photos never carry a source-page image to extract — left null, same
+    // as the URL importer leaves it null when the source page has none.
+    imageUrl: null,
   };
 }
 

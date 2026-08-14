@@ -9,7 +9,7 @@ import {
   parseIsoDurationToMinutes,
 } from "./recipeJsonLd.ts";
 
-const NO_TIME = { prepTimeMinutes: null, cookTimeMinutes: null, totalTimeMinutes: null };
+const NO_TIME = { prepTimeMinutes: null, cookTimeMinutes: null, totalTimeMinutes: null, imageUrl: null };
 
 function scriptTag(json: string): string {
   return `<script type="application/ld+json">${json}</script>`;
@@ -160,7 +160,16 @@ test("hasUsableContent requires a title, an ingredient, or a step", () => {
   assert.equal(hasUsableContent({ title: null, ingredients: [], steps: [], servings: "Serves 4", ...NO_TIME }), false);
   // Nor does time alone.
   assert.equal(
-    hasUsableContent({ title: null, ingredients: [], steps: [], servings: null, prepTimeMinutes: 20, cookTimeMinutes: null, totalTimeMinutes: null }),
+    hasUsableContent({
+      title: null,
+      ingredients: [],
+      steps: [],
+      servings: null,
+      prepTimeMinutes: 20,
+      cookTimeMinutes: null,
+      totalTimeMinutes: null,
+      imageUrl: null,
+    }),
     false
   );
 });
@@ -229,6 +238,73 @@ test("normalizeRecipeNode skips blank/unusable array entries to find the first r
   assert.equal(draft.servings, "8 slices");
 });
 
+test("normalizeRecipeNode reads a string image URL", () => {
+  const draft = normalizeRecipeNode({
+    "@type": "Recipe",
+    name: "Soup",
+    image: "https://example.com/soup.jpg",
+  });
+  assert.equal(draft.imageUrl, "https://example.com/soup.jpg");
+});
+
+test("normalizeRecipeNode reads the first URL from an array of image strings", () => {
+  const draft = normalizeRecipeNode({
+    "@type": "Recipe",
+    name: "Soup",
+    image: ["https://example.com/soup-1x1.jpg", "https://example.com/soup-4x3.jpg"],
+  });
+  assert.equal(draft.imageUrl, "https://example.com/soup-1x1.jpg");
+});
+
+test("normalizeRecipeNode reads url from a single ImageObject", () => {
+  const draft = normalizeRecipeNode({
+    "@type": "Recipe",
+    name: "Soup",
+    image: { "@type": "ImageObject", url: "https://example.com/soup.jpg" },
+  });
+  assert.equal(draft.imageUrl, "https://example.com/soup.jpg");
+});
+
+test("normalizeRecipeNode reads the first usable url from an array of ImageObjects", () => {
+  const draft = normalizeRecipeNode({
+    "@type": "Recipe",
+    name: "Soup",
+    image: [
+      { "@type": "ImageObject", url: "https://example.com/soup-1x1.jpg" },
+      { "@type": "ImageObject", url: "https://example.com/soup-4x3.jpg" },
+    ],
+  });
+  assert.equal(draft.imageUrl, "https://example.com/soup-1x1.jpg");
+});
+
+test("normalizeRecipeNode skips a blank/unusable array entry to find the first real image", () => {
+  const draft = normalizeRecipeNode({
+    "@type": "Recipe",
+    name: "Soup",
+    image: ["", { "@type": "ImageObject" }, "https://example.com/soup.jpg"],
+  });
+  assert.equal(draft.imageUrl, "https://example.com/soup.jpg");
+});
+
+test("normalizeRecipeNode defaults imageUrl to null when image is absent", () => {
+  const draft = normalizeRecipeNode({ "@type": "Recipe", name: "Soup" });
+  assert.equal(draft.imageUrl, null);
+});
+
+test("normalizeRecipeNode rejects a relative image path (no base URL to resolve against)", () => {
+  const draft = normalizeRecipeNode({ "@type": "Recipe", name: "Soup", image: "/images/soup.jpg" });
+  assert.equal(draft.imageUrl, null);
+});
+
+test("normalizeRecipeNode rejects a non-http(s) image URL", () => {
+  const draft = normalizeRecipeNode({
+    "@type": "Recipe",
+    name: "Soup",
+    image: "javascript:alert(1)",
+  });
+  assert.equal(draft.imageUrl, null);
+});
+
 test("end-to-end: a full Recipe JSON-LD page normalizes into a usable draft", () => {
   const html = `
     <html><head>
@@ -242,6 +318,7 @@ test("end-to-end: a full Recipe JSON-LD page normalizes into a usable draft", ()
           prepTime: "PT20M",
           cookTime: "PT40M",
           totalTime: "PT1H",
+          image: "https://example.com/tomato-soup.jpg",
           recipeIngredient: ["2 cups tomatoes", "1 tsp salt"],
           recipeInstructions: [
             { "@type": "HowToStep", text: "Boil water." },
@@ -262,6 +339,7 @@ test("end-to-end: a full Recipe JSON-LD page normalizes into a usable draft", ()
   assert.equal(draft.prepTimeMinutes, 20);
   assert.equal(draft.cookTimeMinutes, 40);
   assert.equal(draft.totalTimeMinutes, 60);
+  assert.equal(draft.imageUrl, "https://example.com/tomato-soup.jpg");
   assert.equal(hasUsableContent(draft), true);
 });
 

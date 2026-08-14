@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test lib/recipeJsonLd.test.ts lib/recipeImportDedup.test.ts lib/recipeTime.test.ts lib/recipeServings.test.ts"
+    "test": "node --test lib/recipeJsonLd.test.ts lib/recipeImportDedup.test.ts lib/recipeTime.test.ts lib/recipeServings.test.ts lib/recipeCardMeta.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.1",

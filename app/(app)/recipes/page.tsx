@@ -4,12 +4,16 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import { sortRecipesByCreatedAt, type Recipe } from "@/lib/recipes";
-import { cardTimeSummary } from "@/lib/recipeTime";
+import { cardMetadataLine } from "@/lib/recipeCardMeta";
+import { RecipeRow } from "@/components/RecipeRow";
 
-type RecipeWithCount = Recipe & { ingredientCount: number; ingredientTexts: string[] };
+// Ingredient texts are kept per-recipe for the search box (title-or-
+// ingredient matching below) — the ingredient count itself is no longer
+// shown on the card, only used for search.
+type RecipeWithIngredientTexts = Recipe & { ingredientTexts: string[] };
 
 export default function RecipesPage() {
-  const [recipes, setRecipes] = useState<RecipeWithCount[]>([]);
+  const [recipes, setRecipes] = useState<RecipeWithIngredientTexts[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [thisWeekCount, setThisWeekCount] = useState(0);
@@ -25,7 +29,7 @@ export default function RecipesPage() {
         supabase
           .from("recipes")
           .select(
-            "id, title, source_url, notes, servings, prep_time_minutes, cook_time_minutes, total_time_minutes, created_at"
+            "id, title, source_url, notes, servings, prep_time_minutes, cook_time_minutes, total_time_minutes, image_url, created_at"
           )
           .order("created_at", { ascending: true }),
         supabase.from("recipe_ingredients").select("recipe_id, text"),
@@ -49,10 +53,10 @@ export default function RecipesPage() {
       }
 
       setRecipes(
-        (recipesResult.data ?? []).map((recipe) => {
-          const ingredientTexts = textsByRecipeId.get(recipe.id) ?? [];
-          return { ...recipe, ingredientCount: ingredientTexts.length, ingredientTexts };
-        })
+        (recipesResult.data ?? []).map((recipe) => ({
+          ...recipe,
+          ingredientTexts: textsByRecipeId.get(recipe.id) ?? [],
+        }))
       );
       setIsLoading(false);
     }
@@ -74,32 +78,26 @@ export default function RecipesPage() {
   }, []);
 
   // Subscribe to Realtime changes so another device's adds/edits/deletes show
-  // up here without a refresh. Only the recipes table is watched — ingredient
-  // counts for existing rows are a nice-to-have, not something this list
-  // needs to keep live, so a brand new recipe's count is fetched once here
-  // and edits to an existing recipe's ingredients don't otherwise touch this
-  // list (they're reflected on the detail page instead).
+  // up here without a refresh. Only the recipes table is watched — a brand
+  // new recipe's ingredients haven't been inserted yet at the moment its own
+  // INSERT event fires (createRecipe writes the recipe row first, then its
+  // children), so it's added here with an empty ingredientTexts rather than
+  // fetched; edits to an existing recipe's ingredients don't otherwise touch
+  // this list (they're reflected on the detail page instead, and in search
+  // after a refresh).
   useEffect(() => {
     const channel = supabase
       .channel("recipes_changes")
       .on<Recipe>(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "recipes" },
-        async (payload) => {
+        (payload) => {
           const newRecipe = payload.new as Recipe;
-          const { count } = await supabase
-            .from("recipe_ingredients")
-            .select("id", { count: "exact", head: true })
-            .eq("recipe_id", newRecipe.id);
-
           setRecipes((current) => {
             if (current.some((recipe) => recipe.id === newRecipe.id)) {
               return current;
             }
-            return sortRecipesByCreatedAt([
-              ...current,
-              { ...newRecipe, ingredientCount: count ?? 0, ingredientTexts: [] },
-            ]);
+            return sortRecipesByCreatedAt([...current, { ...newRecipe, ingredientTexts: [] }]);
           });
         }
       )
@@ -238,38 +236,22 @@ export default function RecipesPage() {
 
           <ul className="flex flex-col divide-y divide-border sm:rounded-2xl sm:border sm:border-border">
             {filteredRecipes.map((recipe) => {
-              const cardTime = cardTimeSummary({
-                prepTimeMinutes: recipe.prep_time_minutes,
-                cookTimeMinutes: recipe.cook_time_minutes,
-                totalTimeMinutes: recipe.total_time_minutes,
-              });
-              // The stored servings value already reads naturally on its own
-              // (e.g. "Serves 4", "4 servings") — shown as-is, with no added
-              // label, so it's never duplicated into something like "Serves
-              // Serves 4".
-              const cardMetadata = [
-                `${recipe.ingredientCount} ingredient${recipe.ingredientCount === 1 ? "" : "s"}`,
-                recipe.servings,
-                cardTime,
-              ]
-                .filter((part): part is string => Boolean(part))
-                .join(" · ");
+              const metadata = cardMetadataLine(
+                {
+                  prepTimeMinutes: recipe.prep_time_minutes,
+                  cookTimeMinutes: recipe.cook_time_minutes,
+                  totalTimeMinutes: recipe.total_time_minutes,
+                },
+                recipe.servings
+              );
               return (
                 <li key={recipe.id}>
-                  <Link
+                  <RecipeRow
                     href={`/recipes/${recipe.id}`}
-                    className="flex items-center justify-between gap-2 px-2.5 py-3 transition hover:bg-surface-muted"
-                  >
-                    <div className="flex min-w-0 flex-col gap-0.5">
-                      <span className="truncate text-[15px] font-medium text-foreground">
-                        {recipe.title}
-                      </span>
-                      <span className="text-sm text-muted-foreground">{cardMetadata}</span>
-                    </div>
-                    <span aria-hidden="true" className="shrink-0 text-xl text-primary">
-                      &rsaquo;
-                    </span>
-                  </Link>
+                    title={recipe.title}
+                    imageUrl={recipe.image_url}
+                    metadata={metadata}
+                  />
                 </li>
               );
             })}

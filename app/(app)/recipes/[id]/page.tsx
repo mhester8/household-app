@@ -57,7 +57,7 @@ export default function RecipeDetailPage() {
         supabase
           .from("recipes")
           .select(
-            "id, title, source_url, notes, servings, prep_time_minutes, cook_time_minutes, total_time_minutes, created_at"
+            "id, title, source_url, notes, servings, prep_time_minutes, cook_time_minutes, total_time_minutes, image_url, created_at"
           )
           .eq("id", recipeId)
           .maybeSingle(),

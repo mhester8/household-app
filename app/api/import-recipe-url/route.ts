@@ -110,6 +110,7 @@ export async function POST(request: Request) {
     prepTimeMinutes: normalized.prepTimeMinutes,
     cookTimeMinutes: normalized.cookTimeMinutes,
     totalTimeMinutes: normalized.totalTimeMinutes,
+    imageUrl: normalized.imageUrl,
   };
 
   return NextResponse.json(draft);

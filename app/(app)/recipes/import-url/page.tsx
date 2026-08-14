@@ -93,7 +93,10 @@ export default function ImportRecipeFromUrlPage() {
   }
 
   async function handleSave(input: RecipeSaveInput): Promise<string | null> {
-    const { id, error } = await createRecipe(input);
+    // RecipeForm has no image field of its own (Phase 2) — the draft's
+    // JSON-LD-derived image is merged in here, at the one call site that
+    // has it, rather than threading it through RecipeForm's generic input.
+    const { id, error } = await createRecipe({ ...input, imageUrl: draft?.imageUrl ?? null });
     if (error) {
       return error;
     }

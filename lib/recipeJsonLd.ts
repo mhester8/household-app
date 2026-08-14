@@ -19,6 +19,7 @@ export type NormalizedRecipeDraft = {
   prepTimeMinutes: number | null;
   cookTimeMinutes: number | null;
   totalTimeMinutes: number | null;
+  imageUrl: string | null;
 };
 
 const JSON_LD_SCRIPT_RE =
@@ -132,6 +133,56 @@ function normalizeServings(node: Record<string, unknown>): string | null {
     return null;
   }
   return normalizeYieldValue(raw);
+}
+
+// Only an absolute http(s) URL is usable directly as an <img src> without
+// also knowing the page's base URL to resolve a relative one against —
+// this module deliberately stays fetch/network-free, so a relative path is
+// treated as unusable (null) rather than guessed at.
+function normalizeAbsoluteImageUrl(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    return null;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
+// A single `image` entry can be a plain URL string or an ImageObject
+// (`{ "@type": "ImageObject", url: "..." }`) — this handles one entry of
+// either shape.
+function normalizeImageEntry(value: unknown): string | null {
+  if (typeof value === "string") {
+    return normalizeAbsoluteImageUrl(value);
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return normalizeAbsoluteImageUrl((value as Record<string, unknown>).url);
+  }
+  return null;
+}
+
+// Schema.org's `image` is a string URL, an ImageObject, or an array of
+// either (sites commonly list several sizes/crops). As with recipeYield,
+// the first entry that normalizes to a usable absolute URL wins.
+function normalizeImage(node: Record<string, unknown>): string | null {
+  const raw = node.image;
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const value = normalizeImageEntry(item);
+      if (value) {
+        return value;
+      }
+    }
+    return null;
+  }
+  return normalizeImageEntry(raw);
 }
 
 // Schema.org's prepTime/cookTime/totalTime are ISO-8601 durations. Real
@@ -267,6 +318,7 @@ export function normalizeRecipeNode(node: Record<string, unknown>): NormalizedRe
     prepTimeMinutes: normalizeDurationValue(node.prepTime),
     cookTimeMinutes: normalizeDurationValue(node.cookTime),
     totalTimeMinutes: normalizeDurationValue(node.totalTime),
+    imageUrl: normalizeImage(node),
   };
 }
 

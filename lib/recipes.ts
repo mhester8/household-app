@@ -9,6 +9,7 @@ export type Recipe = {
   prep_time_minutes: number | null;
   cook_time_minutes: number | null;
   total_time_minutes: number | null;
+  image_url: string | null;
   created_at: string;
 };
 
@@ -64,6 +65,11 @@ export type RecipeSaveInput = {
   totalTimeMinutes: number | null;
   ingredients: string[];
   steps: string[];
+  // Omitted by the manual create/edit forms, which have no image field yet
+  // (Phase 2). Only the URL importer's save step sets this, from the
+  // draft's JSON-LD-derived image. `createRecipe` treats "omitted" the
+  // same as null.
+  imageUrl?: string | null;
 };
 
 // Shape returned by POST /api/import-recipe and /api/import-recipe-url — a
@@ -86,6 +92,10 @@ export type RecipeImportDraft = {
   prepTimeMinutes: number | null;
   cookTimeMinutes: number | null;
   totalTimeMinutes: number | null;
+  // The source page's JSON-LD image, if any — set only by the URL importer.
+  // Photo imports never set this (no source page to read one from); the
+  // photo importer leaves it null same as an absent JSON-LD image would.
+  imageUrl: string | null;
 };
 
 async function insertChildren(recipeId: string, input: RecipeSaveInput): Promise<string | null> {
@@ -126,6 +136,7 @@ export async function createRecipe(
       prep_time_minutes: input.prepTimeMinutes,
       cook_time_minutes: input.cookTimeMinutes,
       total_time_minutes: input.totalTimeMinutes,
+      image_url: input.imageUrl ?? null,
     })
     .select("id")
     .single();
