@@ -56,6 +56,7 @@ export default function HomePage() {
       <FeatureCard title="Notes & To-Dos" description="Coming soon" />
       <FeatureCard href="/workouts" title="Workouts" description="Templates & sessions" />
       <FeatureCard href="/recipes" title="Recipes" description="Saved recipe library" />
+      <FeatureCard href="/pinterest" title="Pinterest" description="Connect your account" />
     </div>
   );
 }
