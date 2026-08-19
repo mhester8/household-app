@@ -11,6 +11,7 @@ import {
   type PantryBasic,
 } from "@/lib/pantryBasics";
 import type { ToastState } from "@/components/Toast";
+import { createId } from "@/lib/id";
 
 const SUCCESS_TOAST_MS = 4000;
 const ERROR_TOAST_MS = 6000;
@@ -289,7 +290,7 @@ export function IngredientReviewPanel({
     }
 
     try {
-      await insertGroceryItems(toInsert.map((line) => ({ id: crypto.randomUUID(), name: line.text })));
+      await insertGroceryItems(toInsert.map((line) => ({ id: createId(), name: line.text })));
       setIsSubmitting(false);
       const itemWord = toInsert.length === 1 ? "item" : "items";
       onToast(

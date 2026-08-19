@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase/client";
 import { createRecipe, type RecipeImportDraft, type RecipeSaveInput } from "@/lib/recipes";
 import { RecipeForm, newDraftLine, createDraftLineId } from "@/components/RecipeForm";
 import { MAX_IMPORT_IMAGES, MAX_TOTAL_IMPORT_IMAGE_BYTES } from "@/lib/recipeImportLimits";
+import { createId } from "@/lib/id";
 
 const MAX_LONG_EDGE = 1600;
 const JPEG_QUALITY = 0.8;
@@ -55,13 +56,6 @@ async function compressImage(file: File): Promise<File> {
   } finally {
     bitmap.close();
   }
-}
-
-function makeId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 export default function ImportRecipePage() {
@@ -195,7 +189,7 @@ export default function ImportRecipePage() {
 
     setImages((current) => [
       ...current,
-      ...compressed.map((file) => ({ id: makeId(), file, previewUrl: URL.createObjectURL(file) })),
+      ...compressed.map((file) => ({ id: createId(), file, previewUrl: URL.createObjectURL(file) })),
     ]);
   }
 

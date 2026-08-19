@@ -8,6 +8,7 @@ import { sortByPosition } from "@/lib/recipes";
 import { RecipeForm, type RecipeDraftLine, type RecipeSaveInput } from "@/components/RecipeForm";
 import { RecipeImageField } from "@/components/RecipeImageField";
 import { deleteRecipeImageIfOwned, uploadRecipeImage } from "@/lib/recipeImages";
+import { createId } from "@/lib/id";
 
 export default function EditRecipePage() {
   const params = useParams<{ id: string }>();
@@ -65,13 +66,13 @@ export default function EditRecipePage() {
       setImageUrl(recipeResult.data.image_url ?? null);
       setIngredients(
         sortByPosition(ingredientsResult.data ?? []).map((row) => ({
-          key: crypto.randomUUID(),
+          key: createId(),
           text: row.text,
         }))
       );
       setSteps(
         sortByPosition(stepsResult.data ?? []).map((row) => ({
-          key: crypto.randomUUID(),
+          key: createId(),
           text: row.text,
         }))
       );

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { RecipeSaveInput } from "@/lib/recipes";
 import { hoursMinutesToTotalMinutes, totalMinutesToHoursMinutesStrings } from "@/lib/recipeTime";
+import { createId } from "@/lib/id";
 
 export type { RecipeSaveInput } from "@/lib/recipes";
 
@@ -12,16 +13,11 @@ export type RecipeDraftLine = {
   text: string;
 };
 
-// crypto.randomUUID() is unavailable on some mobile browsers (seen on iOS
-// Safari and Brave) even though `crypto` itself exists. These ids are only
-// ever used as React keys/local form state for draft rows — never
-// persisted as a recipe/database id — so a timestamp + random suffix is a
-// fine collision-resistant fallback.
+// Kept as a named export (rather than having callers use lib/id's createId
+// directly) since import/import-pin/import-url already import this name for
+// their own draft ingredient/step lines.
 export function createDraftLineId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return createId();
 }
 
 export function newDraftLine(): RecipeDraftLine {
@@ -84,6 +80,21 @@ export function RecipeForm({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Set right after an Enter-key insert below so the effect can focus the
+  // new row once it's actually in the DOM, then clear itself. A ref, not
+  // state, since nothing needs to re-render off this value.
+  const pendingFocusKeyRef = useRef<string | null>(null);
+  const ingredientInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+
+  useEffect(() => {
+    const key = pendingFocusKeyRef.current;
+    if (!key) {
+      return;
+    }
+    ingredientInputRefs.current.get(key)?.focus();
+    pendingFocusKeyRef.current = null;
+  }, [ingredients]);
+
   const timeRows = [
     { label: "Prep time", hours: prepHours, setHours: setPrepHours, minutes: prepMinutes, setMinutes: setPrepMinutes },
     { label: "Cook time", hours: cookHours, setHours: setCookHours, minutes: cookMinutes, setMinutes: setCookMinutes },
@@ -96,6 +107,31 @@ export function RecipeForm({
 
   function removeIngredient(key: string) {
     setIngredients((current) => current.filter((line) => line.key !== key));
+  }
+
+  // Enter on an ingredient row inserts a new empty row right after it and
+  // focuses it, instead of submitting the form (the default behavior for a
+  // text input inside a <form>) — see pendingFocusKey effect above.
+  function insertIngredientAfter(key: string) {
+    const line = newDraftLine();
+    setIngredients((current) => {
+      const index = current.findIndex((existing) => existing.key === key);
+      const next = [...current];
+      next.splice(index + 1, 0, line);
+      return next;
+    });
+    pendingFocusKeyRef.current = line.key;
+  }
+
+  function handleIngredientKeyDown(event: React.KeyboardEvent<HTMLInputElement>, key: string) {
+    // isComposing guards IME composition (e.g. Japanese/Chinese input on
+    // mobile keyboards) — the Enter that confirms a composed character
+    // shouldn't also insert a new row.
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) {
+      return;
+    }
+    event.preventDefault();
+    insertIngredientAfter(key);
   }
 
   function updateStep(key: string, text: string) {
@@ -255,12 +291,21 @@ export function RecipeForm({
             {ingredients.map((line, index) => (
               <div key={line.key} className="flex items-center gap-2">
                 <input
+                  ref={(element) => {
+                    if (element) {
+                      ingredientInputRefs.current.set(line.key, element);
+                    } else {
+                      ingredientInputRefs.current.delete(line.key);
+                    }
+                  }}
                   type="text"
                   value={line.text}
                   onChange={(event) => updateIngredient(line.key, event.target.value)}
+                  onKeyDown={(event) => handleIngredientKeyDown(event, line.key)}
                   placeholder="e.g. 2 tbsp olive oil"
                   aria-label={`Ingredient ${index + 1}`}
                   autoComplete="off"
+                  enterKeyHint="next"
                   className="min-h-11 min-w-0 flex-1 rounded-xl border border-border bg-surface-muted px-3.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 />
                 <button

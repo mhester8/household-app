@@ -13,6 +13,7 @@ import {
 } from "@/lib/groceryItems";
 import { LeafIcon } from "@/components/LeafIcon";
 import { ItemActionsMenu } from "@/components/ItemActionsMenu";
+import { createId } from "@/lib/id";
 import { Toast, type ToastState } from "@/components/Toast";
 
 // How long an undo/error toast stays up before it auto-dismisses. Delete's
@@ -201,7 +202,7 @@ export default function GroceriesPage() {
       return;
     }
 
-    const id = crypto.randomUUID();
+    const id = createId();
     const optimisticItem: GroceryItem = {
       id,
       name: trimmed,

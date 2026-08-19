@@ -1,4 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+// Relative import, not the "@/..." alias — this file is covered by
+// recipeImages.test.ts, run via plain `node --test`, which can't resolve
+// that alias (same reason lib/recipes.ts has no test file).
+import { createId } from "./id.ts";
 
 // Phase 2: user-uploaded recipe photos. Covers everything except the
 // <input type="file"> UI itself (see RecipeImageField). The two Storage-
@@ -45,17 +49,6 @@ export function validateRecipeImageFile(file: File): string | null {
   return null;
 }
 
-// crypto.randomUUID() is unavailable on some mobile browsers even though
-// `crypto` itself exists (see RecipeForm's createDraftLineId) — same
-// timestamp+random fallback here, since this id becomes part of a
-// permanent Storage object path rather than just a throwaway React key.
-function uniqueId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
-
 // Object path convention: {recipe_id}/{unique-filename}. Keying by
 // recipe_id keeps "everything belonging to this recipe" a simple prefix; a
 // fresh filename on every call (rather than one fixed name) means a
@@ -64,7 +57,7 @@ function uniqueId(): string {
 // image_url.
 export function buildRecipeImagePath(recipeId: string, file: File): string {
   const extension = getFileExtension(file.name) ?? "jpg";
-  return `${recipeId}/${uniqueId()}.${extension}`;
+  return `${recipeId}/${createId()}.${extension}`;
 }
 
 // True when `url` is a public URL for an object in our own recipe-images

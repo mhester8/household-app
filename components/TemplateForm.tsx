@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatDuration, parseRestDuration } from "@/lib/workouts";
+import { createId } from "@/lib/id";
 
 const DEFAULT_SETS = 3;
 const DEFAULT_REST_SECONDS = 60;
@@ -16,7 +17,7 @@ export type TemplateDraftExercise = {
 
 export function newDraftExercise(): TemplateDraftExercise {
   return {
-    key: crypto.randomUUID(),
+    key: createId(),
     name: "",
     sets: String(DEFAULT_SETS),
     restSeconds: formatDuration(DEFAULT_REST_SECONDS),

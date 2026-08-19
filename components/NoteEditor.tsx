@@ -285,7 +285,7 @@ export function NoteEditor({ noteId }: { noteId: string }) {
             placeholder="Write a note..."
             aria-label="Note"
             rows={10}
-            className="min-h-40 flex-1 rounded-xl border border-border bg-surface-muted px-3.5 py-2.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            className="min-h-[60dvh] flex-1 rounded-xl border border-border bg-surface-muted px-3.5 py-2.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
       )}
