@@ -22,6 +22,7 @@ import {
   saveShoppingModeState,
 } from "@/lib/shoppingModePersistence";
 import { reconcileGroceryItemsWithSnapshot } from "@/lib/groceryReconciliation";
+import { usePullToRefresh } from "@/lib/usePullToRefresh";
 
 // How long an undo/error toast stays up before it auto-dismisses. Delete's
 // undo window and its toast share this duration on purpose: once the toast
@@ -139,6 +140,36 @@ export default function GroceriesPage() {
     loadItems();
   }, [userId]);
 
+  // Fetches the authoritative grocery snapshot and reconciles it into local
+  // state, protecting in-flight optimistic adds and pending-undo deletes.
+  // Shared by the hidden -> visible resume effect below and the
+  // pull-to-refresh gesture — both are just different triggers for the same
+  // "repair local state against the server" behavior, so there's exactly one
+  // implementation of what "refresh" means for this page. Guarded by
+  // isReconcilingRef so overlapping triggers (fast background/foreground
+  // flapping, or a pull landing mid-resume-reconcile) collapse into a single
+  // in-flight fetch instead of piling up requests.
+  async function reconcileFromServer() {
+    if (isReconcilingRef.current) {
+      return;
+    }
+    isReconcilingRef.current = true;
+    try {
+      const { data } = await fetchGroceryItemsSnapshot();
+      if (!data) {
+        return;
+      }
+      setItems((currentItems) =>
+        reconcileGroceryItemsWithSnapshot(currentItems, data, {
+          pendingDeleteIds: new Set(pendingDeletesRef.current.keys()),
+          pendingAddIds: new Set(pendingAddIdsRef.current),
+        })
+      );
+    } finally {
+      isReconcilingRef.current = false;
+    }
+  }
+
   // Repairs local state after a genuine mobile background/resume. Realtime's
   // own recovery (lib/useRealtimeSubscription.ts) only restores delivery of
   // *future* postgres_changes events — it never replays whatever mutations
@@ -154,25 +185,11 @@ export default function GroceriesPage() {
       return;
     }
 
-    async function handleVisibilityChange() {
-      if (document.visibilityState !== "visible" || isReconcilingRef.current) {
+    function handleVisibilityChange() {
+      if (document.visibilityState !== "visible") {
         return;
       }
-      isReconcilingRef.current = true;
-      try {
-        const { data } = await fetchGroceryItemsSnapshot();
-        if (!data) {
-          return;
-        }
-        setItems((currentItems) =>
-          reconcileGroceryItemsWithSnapshot(currentItems, data, {
-            pendingDeleteIds: new Set(pendingDeletesRef.current.keys()),
-            pendingAddIds: new Set(pendingAddIdsRef.current),
-          })
-        );
-      } finally {
-        isReconcilingRef.current = false;
-      }
+      reconcileFromServer();
     }
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -180,6 +197,11 @@ export default function GroceriesPage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [userId]);
+
+  // The pull gesture is just a third trigger for the same reconciliation
+  // used above — see reconcileFromServer. Convenience/fallback only; it does
+  // not replace or alter Realtime recovery (useRealtimeSubscription.ts).
+  const pullToRefreshStatus = usePullToRefresh(reconcileFromServer);
 
   // Subscribe to Realtime changes so other browsers' writes show up without a
   // refresh. useRealtimeSubscription owns the channel's lifecycle (including
@@ -894,8 +916,28 @@ export default function GroceriesPage() {
     );
   }
 
+  function renderPullToRefreshIndicator() {
+    if (pullToRefreshStatus === "idle") {
+      return null;
+    }
+    const label =
+      pullToRefreshStatus === "ready"
+        ? "Release to refresh"
+        : pullToRefreshStatus === "refreshing"
+          ? "Refreshing…"
+          : "Pull to refresh";
+
+    return (
+      <p aria-live="polite" className="py-1 text-center text-xs font-medium text-muted-foreground">
+        {label}
+      </p>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-2 sm:gap-4">
+      {renderPullToRefreshIndicator()}
+
       <div className="flex items-center gap-2">
         <Link
           href="/"
