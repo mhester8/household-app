@@ -202,6 +202,27 @@ The shared hook proves insufficient for future notification/offline requirements
 
 ---
 
+## 010 - Shopping Mode continuity is device-local, not shared Supabase state
+
+**Date:** 2026-08-19
+
+**Status:** Active
+
+### Decision
+Persist an in-progress Shopping Mode session (whether it's active, and the AI-assigned category for each item) in the browser's `localStorage`, scoped to the individual device/browser — not in Supabase. Grocery data itself (`grocery_items`) remains fully shared, as it always has been; only the Shopping Mode *view* over that shared list is device-local. Restoring a persisted session on the same device never re-requests AI grouping — it reuses the previously assigned categories, letting the existing item-id-based reconciliation handle anything that changed on the shared list while the session was persisted.
+
+### Why
+The problem being solved is single-device continuity ("don't make me redo this on *my* phone after it backgrounds or closes"), not cross-device visibility into who's shopping. Treating this as device-local avoids inventing a shared shopping-session table, ownership/coordination rules for two people potentially shopping at once, a Realtime channel for session state, or conflict handling — none of which the current two-person household actually needs. Shopping Mode was already conceptually "a different view of the same items, never a copy," so keeping its continuity client-local is consistent with that, not a new exception.
+
+### Alternatives considered
+- A shared Supabase table/columns for shopping-session state, visible and resumable from either device.
+- No persistence at all (the prior state — closing/backgrounding the app always discarded Shopping Mode and required a fresh AI grouping call).
+
+### Revisit when
+The household wants a second device/person to see or resume the same active shopping session, or real usage shows device-local persistence causing confusion (e.g. expecting Shopping Mode to follow them between devices).
+
+---
+
 ## Maintenance Guidelines
 
 - Record only meaningful product or architectural decisions.

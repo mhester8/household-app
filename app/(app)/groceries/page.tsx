@@ -16,6 +16,11 @@ import { ItemActionsMenu } from "@/components/ItemActionsMenu";
 import { createId } from "@/lib/id";
 import { Toast, type ToastState } from "@/components/Toast";
 import { REALTIME_UNAVAILABLE_MESSAGE, useRealtimeSubscription } from "@/lib/useRealtimeSubscription";
+import {
+  clearShoppingModeState,
+  loadShoppingModeState,
+  saveShoppingModeState,
+} from "@/lib/shoppingModePersistence";
 
 // How long an undo/error toast stays up before it auto-dismisses. Delete's
 // undo window and its toast share this duration on purpose: once the toast
@@ -76,6 +81,13 @@ export default function GroceriesPage() {
   // trailing blur event — this flag stops that blur from re-committing.
   const skipNextEditBlurRef = useRef(false);
   const isCategorizingRef = useRef(false);
+  // The persistence effect below must never write on its own first run: that
+  // run's closure still holds isShoppingMode/categoryByItemId's initial
+  // (false/{}) values, since the mount-time restore effect's setState calls
+  // haven't been applied to a render yet when effects for this same commit
+  // run. Skipping exactly one write here is what stops a real persisted
+  // session from being clobbered by those defaults before restoration lands.
+  const hasSkippedInitialPersistRef = useRef(false);
 
   // The authenticated layout already guarantees a session exists before this
   // page renders; read it locally so the data effects below can keep their
@@ -163,6 +175,47 @@ export default function GroceriesPage() {
     onRecovered: () =>
       setErrorMessage((current) => (current === REALTIME_UNAVAILABLE_MESSAGE ? null : current)),
   });
+
+  // Restores a same-device Shopping Mode session left active by a previous
+  // visit (refresh, PWA close/reopen, route away-and-back) — client-only, so
+  // isShoppingMode/categoryByItemId must keep their normal false/{} defaults
+  // during server rendering and this component's first client render; only
+  // this post-mount effect may read localStorage, which avoids any
+  // server/client hydration mismatch. A missing or corrupt entry is treated
+  // as "no session" and the page just starts in normal mode, same as today.
+  useEffect(() => {
+    const persisted = loadShoppingModeState();
+    if (persisted?.isActive) {
+      // A deliberate one-time sync from a client-only external store
+      // (localStorage) into component state right after mount — not a
+      // value derivable during render, since localStorage isn't reachable
+      // during SSR/the first client render (see the comment above this
+      // effect). This is the case the lint rule's general "you might not
+      // need an effect" guidance doesn't cover.
+      /* eslint-disable react-hooks/set-state-in-effect */
+      setIsShoppingMode(true);
+      setCategoryByItemId(persisted.categoryByItemId);
+      /* eslint-enable react-hooks/set-state-in-effect */
+    }
+  }, []);
+
+  // Keeps the persisted session in sync with Shopping Mode's own state —
+  // covers Start Shopping, Done, and every category update (the initial AI
+  // grouping pass and later background re-categorization alike) without
+  // those call sites needing to know persistence exists. See
+  // hasSkippedInitialPersistRef above for why this effect's very first
+  // invocation must not write anything.
+  useEffect(() => {
+    if (!hasSkippedInitialPersistRef.current) {
+      hasSkippedInitialPersistRef.current = true;
+      return;
+    }
+    if (isShoppingMode) {
+      saveShoppingModeState({ isActive: true, categoryByItemId });
+    } else {
+      clearShoppingModeState();
+    }
+  }, [isShoppingMode, categoryByItemId]);
 
   function showToast(next: ToastState, durationMs: number) {
     if (toastTimerRef.current) {
@@ -496,6 +549,10 @@ export default function GroceriesPage() {
 
   function handleExitShopping() {
     setIsShoppingMode(false);
+    // Ending the trip should mean the next "Start Shopping" is a fresh AI
+    // grouping, not a resume — clear the grouping along with the mode itself
+    // (the persistence effect above clears the persisted copy in response).
+    setCategoryByItemId({});
   }
 
   // While shopping, pick up categories for items that arrived after the last

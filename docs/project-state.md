@@ -69,7 +69,7 @@ No ORM — all database access goes through the `@supabase/supabase-js` client d
 
 ### Grocery / shopping
 
-One shared, realtime-synced list (`grocery_items`). Add/edit/complete/delete with optimistic UI, undo-on-delete, duplicate-name detection, and history-based autocomplete. **Shopping Mode** groups active items into store sections via an OpenAI call (`/api/group-groceries`, model `gpt-5.4-nano`, strict JSON-schema) whose output is reconciled against the actual submitted ids so nothing is invented or dropped; only in Shopping Mode can items be checked off.
+One shared, realtime-synced list (`grocery_items`). Add/edit/complete/delete with optimistic UI, undo-on-delete, duplicate-name detection, and history-based autocomplete. **Shopping Mode** groups active items into store sections via an OpenAI call (`/api/group-groceries`, model `gpt-5.4-nano`, strict JSON-schema) whose output is reconciled against the actual submitted ids so nothing is invented or dropped; only in Shopping Mode can items be checked off. An active Shopping Mode session (whether it's on, and each item's assigned category) is persisted to `localStorage` (`lib/shoppingModePersistence.ts`) so it silently survives navigating away, a refresh, or closing/reopening the PWA on the same device without triggering another AI grouping call — this is deliberately device-local, not synced to other devices (decision 010).
 
 ### Workouts
 
