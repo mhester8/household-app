@@ -24,6 +24,9 @@ export default function ThisWeekPage() {
   const [isLoadingReviewLines, setIsLoadingReviewLines] = useState(false);
   const [reviewLines, setReviewLines] = useState<IngredientReviewLine[]>([]);
 
+  const [isConfirmingClear, setIsConfirmingClear] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
+
   // In-progress edits to the "Making: N servings" input, keyed by This Week
   // entry id — separate from the persisted `desired_servings` so typing
   // doesn't write on every keystroke. Same draft-state split RecipeForm uses
@@ -183,6 +186,38 @@ export default function ThisWeekPage() {
     }
   }
 
+  // Same optimistic-then-rollback shape as handleRemove, just scoped to
+  // every currently-queued entry (deletes by id, like the per-row remove,
+  // rather than an unconditional table delete) instead of one.
+  async function handleClearThisWeek() {
+    setIsClearing(true);
+    const snapshot = queue;
+    setQueue([]);
+
+    const { error } = await supabase
+      .from("this_week_recipes")
+      .delete()
+      .in("id", snapshot.map((entry) => entry.id));
+
+    setIsClearing(false);
+
+    if (error) {
+      setQueue(sortByAddedAt(snapshot));
+      showToast(
+        {
+          message: "Couldn't clear This Week",
+          actionLabel: "Retry",
+          onAction: () => handleClearThisWeek(),
+          tone: "danger",
+        },
+        ERROR_TOAST_MS
+      );
+      return;
+    }
+
+    setIsConfirmingClear(false);
+  }
+
   // Controlled value for the "Making: N servings" input: whatever's being
   // actively typed, else the persisted override, else the recipe's own
   // parsed yield (so the field starts pre-filled at the original count
@@ -244,6 +279,7 @@ export default function ThisWeekPage() {
   }
 
   async function openReview() {
+    setIsConfirmingClear(false);
     setIsLoadingReviewLines(true);
 
     const recipeIds = queue.map((entry) => entry.recipe_id);
@@ -371,6 +407,45 @@ export default function ThisWeekPage() {
               );
             })}
           </ul>
+
+          {!isReviewOpen && (
+            <div className="flex justify-end">
+              {isConfirmingClear ? (
+                <div className="flex w-full flex-col gap-3 rounded-2xl border border-danger/30 bg-surface p-4">
+                  <span className="text-sm text-foreground">
+                    Clear This Week? All {queue.length} recipe{queue.length === 1 ? "" : "s"} currently in
+                    This Week will be removed.
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmingClear(false)}
+                      disabled={isClearing}
+                      className="min-h-11 flex-1 rounded-xl bg-surface-muted px-4 text-sm font-semibold text-foreground transition hover:bg-border disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearThisWeek}
+                      disabled={isClearing}
+                      className="min-h-11 flex-1 rounded-xl bg-danger px-4 text-sm font-semibold text-primary-foreground transition hover:bg-danger/90 disabled:opacity-50"
+                    >
+                      {isClearing ? "Clearing..." : "Clear This Week"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmingClear(true)}
+                  className="shrink-0 rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-surface-muted hover:text-foreground"
+                >
+                  Clear This Week
+                </button>
+              )}
+            </div>
+          )}
 
           {!isReviewOpen && (
             <button

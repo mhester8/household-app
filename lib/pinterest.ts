@@ -259,29 +259,59 @@ export type BoardsResult =
   | { ok: true; boards: PinterestBoardSummary[] }
   | { ok: false; status: number };
 
+// Pinterest's board listing is cursor-paginated the same way Pin listing
+// is (see fetchPinterestBoardPins below) — a `bookmark` in the response
+// means there's another page. Unlike Pins, where a single board can hold
+// hundreds and lazy "Load more" loading is worth it, a household's total
+// board count is small and bounded, so it's simplest to follow every page
+// here and hand the caller one complete list — no bookmark/pagination
+// state needs to leak out to the API route or the client UI. MAX_PAGES is
+// pure defense-in-depth against a pathological repeating bookmark; a real
+// account will never come close to it.
+const MAX_BOARD_PAGES = 20;
+
 export async function fetchPinterestBoards(accessToken: string): Promise<BoardsResult> {
-  let response: Response;
-  try {
-    response = await fetch(PINTEREST_BOARDS_URL, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-  } catch {
-    return { ok: false, status: 502 };
-  }
+  const boards: PinterestBoardSummary[] = [];
+  let bookmark: string | null = null;
+  let pageCount = 0;
 
-  if (!response.ok) {
-    return { ok: false, status: response.status };
-  }
+  do {
+    const url = new URL(PINTEREST_BOARDS_URL);
+    if (bookmark) {
+      url.searchParams.set("bookmark", bookmark);
+    }
 
-  try {
-    const body = (await response.json()) as { items?: Array<{ id?: unknown; name?: unknown }> };
-    const boards = (body.items ?? [])
-      .filter((item): item is { id: string; name: string } => typeof item.id === "string" && typeof item.name === "string")
-      .map((item) => ({ id: item.id, name: item.name }));
-    return { ok: true, boards };
-  } catch {
-    return { ok: false, status: 502 };
-  }
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+    } catch {
+      return { ok: false, status: 502 };
+    }
+
+    if (!response.ok) {
+      return { ok: false, status: response.status };
+    }
+
+    try {
+      const body = (await response.json()) as {
+        items?: Array<{ id?: unknown; name?: unknown }>;
+        bookmark?: unknown;
+      };
+      const pageBoards = (body.items ?? [])
+        .filter((item): item is { id: string; name: string } => typeof item.id === "string" && typeof item.name === "string")
+        .map((item) => ({ id: item.id, name: item.name }));
+      boards.push(...pageBoards);
+      bookmark = typeof body.bookmark === "string" ? body.bookmark : null;
+    } catch {
+      return { ok: false, status: 502 };
+    }
+
+    pageCount += 1;
+  } while (bookmark && pageCount < MAX_BOARD_PAGES);
+
+  return { ok: true, boards };
 }
 
 // Pinterest board and Pin ids are numeric strings. Validating this before
