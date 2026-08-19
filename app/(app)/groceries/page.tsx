@@ -22,7 +22,7 @@ import {
   saveShoppingModeState,
 } from "@/lib/shoppingModePersistence";
 import { reconcileGroceryItemsWithSnapshot } from "@/lib/groceryReconciliation";
-import { usePullToRefresh } from "@/lib/usePullToRefresh";
+import { usePullToRefreshHandler } from "@/lib/PullToRefreshContext";
 
 // How long an undo/error toast stays up before it auto-dismisses. Delete's
 // undo window and its toast share this duration on purpose: once the toast
@@ -198,10 +198,11 @@ export default function GroceriesPage() {
     };
   }, [userId]);
 
-  // The pull gesture is just a third trigger for the same reconciliation
+  // The pull gesture (mounted globally by PullToRefreshProvider in
+  // app/(app)/layout.tsx) is just a third trigger for the same reconciliation
   // used above — see reconcileFromServer. Convenience/fallback only; it does
   // not replace or alter Realtime recovery (useRealtimeSubscription.ts).
-  const pullToRefreshStatus = usePullToRefresh(reconcileFromServer);
+  usePullToRefreshHandler(reconcileFromServer);
 
   // Subscribe to Realtime changes so other browsers' writes show up without a
   // refresh. useRealtimeSubscription owns the channel's lifecycle (including
@@ -916,28 +917,8 @@ export default function GroceriesPage() {
     );
   }
 
-  function renderPullToRefreshIndicator() {
-    if (pullToRefreshStatus === "idle") {
-      return null;
-    }
-    const label =
-      pullToRefreshStatus === "ready"
-        ? "Release to refresh"
-        : pullToRefreshStatus === "refreshing"
-          ? "Refreshing…"
-          : "Pull to refresh";
-
-    return (
-      <p aria-live="polite" className="py-1 text-center text-xs font-medium text-muted-foreground">
-        {label}
-      </p>
-    );
-  }
-
   return (
     <div className="flex flex-col gap-2 sm:gap-4">
-      {renderPullToRefreshIndicator()}
-
       <div className="flex items-center gap-2">
         <Link
           href="/"

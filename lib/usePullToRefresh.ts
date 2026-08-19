@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { classifyPullDelta, type PullGestureState } from "./pullToRefreshGesture";
 
 export type PullToRefreshStatus = PullGestureState | "refreshing";
+export type PullToRefreshHandler = () => Promise<void>;
 
 // A drag starting inside one of these shouldn't be read as a pull — it's the
 // user interacting with the control (placing a caret, opening a select),
@@ -11,19 +12,17 @@ export type PullToRefreshStatus = PullGestureState | "refreshing";
 const INTERACTIVE_SELECTOR = 'input, textarea, select, [contenteditable=""], [contenteditable="true"]';
 
 /**
- * Dependency-free pull-to-refresh for a document-level scroller. Touch
- * listeners are all passive — this never calls preventDefault, so it never
- * fights normal scrolling or the browser's own overscroll/rubber-band; it
- * only watches touch deltas to drive a small status the caller can render,
- * and to invoke `onRefresh` once per completed pull past the threshold.
- * Gesture mechanics only — the caller owns what "refresh" actually does.
+ * Dependency-free pull-to-refresh gesture for a document-level scroller.
+ * Meant to be mounted exactly once, by PullToRefreshProvider (see
+ * lib/PullToRefreshContext.tsx) — `handlerRef` is read at the moment a pull
+ * completes, so whichever page most recently registered via
+ * usePullToRefreshHandler is the one that runs; a page that never registers
+ * one (`handlerRef.current` stays null) simply never activates the gesture.
+ * Touch listeners are all passive — this never calls preventDefault, so it
+ * never fights normal scrolling or the browser's own overscroll/rubber-band.
  */
-export function usePullToRefresh(onRefresh: () => Promise<void>): PullToRefreshStatus {
+export function usePullToRefresh(handlerRef: RefObject<PullToRefreshHandler | null>): PullToRefreshStatus {
   const [status, setStatus] = useState<PullToRefreshStatus>("idle");
-  const onRefreshRef = useRef(onRefresh);
-  useEffect(() => {
-    onRefreshRef.current = onRefresh;
-  });
 
   useEffect(() => {
     let startX = 0;
@@ -37,7 +36,7 @@ export function usePullToRefresh(onRefresh: () => Promise<void>): PullToRefreshS
     }
 
     function handleTouchStart(event: TouchEvent) {
-      if (refreshing || event.touches.length !== 1) {
+      if (refreshing || event.touches.length !== 1 || !handlerRef.current) {
         tracking = false;
         return;
       }
@@ -88,16 +87,17 @@ export function usePullToRefresh(onRefresh: () => Promise<void>): PullToRefreshS
       }
       tracking = false;
 
-      if (!armed) {
+      const handler = armed ? handlerRef.current : null;
+      armed = false;
+
+      if (!handler) {
         setStatus("idle");
         return;
       }
 
-      armed = false;
       refreshing = true;
       setStatus("refreshing");
-      onRefreshRef
-        .current()
+      handler()
         .catch(() => {})
         .finally(() => {
           refreshing = false;
@@ -116,6 +116,9 @@ export function usePullToRefresh(onRefresh: () => Promise<void>): PullToRefreshS
       document.removeEventListener("touchend", endGesture);
       document.removeEventListener("touchcancel", endGesture);
     };
+    // handlerRef is a stable ref object for the provider's lifetime — this
+    // effect is meant to run once per app-session mount, not per registration.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return status;

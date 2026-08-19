@@ -6,6 +6,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase/client";
 import SignInForm from "@/components/SignInForm";
 import { LeafIcon } from "@/components/LeafIcon";
+import { PullToRefreshProvider } from "@/lib/PullToRefreshContext";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -98,7 +99,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           ) : !session ? (
             <SignInForm />
           ) : (
-            children
+            <PullToRefreshProvider>{children}</PullToRefreshProvider>
           )}
         </div>
       </main>

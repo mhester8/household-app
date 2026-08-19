@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import type { WorkoutTemplate } from "@/lib/workouts";
+import { usePullToRefreshHandler } from "@/lib/PullToRefreshContext";
 
 type TemplateWithCount = WorkoutTemplate & { exerciseCount: number };
 
@@ -78,6 +79,10 @@ export default function WorkoutsPage() {
     }
     runInitialLoad();
   }, []);
+
+  // Pull-to-refresh (global gesture in app/(app)/layout.tsx) re-runs the
+  // exact same load as the initial mount above — no separate refresh path.
+  usePullToRefreshHandler(loadData);
 
   // Creates the session + snapshot exercises for a template that we've
   // already confirmed is safe to start (no active session in the way).
