@@ -5,15 +5,18 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import {
+  getRecipeOriginal,
   removeLineById,
   sortByPosition,
   upsertLine,
   type Recipe,
   type RecipeIngredient,
+  type RecipeOriginal,
   type RecipeStep,
 } from "@/lib/recipes";
 import type { ThisWeekRecipe } from "@/lib/thisWeek";
 import { IngredientReviewPanel, type IngredientReviewLine } from "@/components/IngredientReviewPanel";
+import { RecipeOriginalView } from "@/components/RecipeOriginalView";
 import { Toast, type ToastState } from "@/components/Toast";
 import { detailTimeSegments } from "@/lib/recipeTime";
 import { deleteRecipeImageIfOwned } from "@/lib/recipeImages";
@@ -49,6 +52,12 @@ export default function RecipeDetailPage() {
   const [isInThisWeek, setIsInThisWeek] = useState(false);
   const [thisWeekRowId, setThisWeekRowId] = useState<string | null>(null);
   const [isTogglingThisWeek, setIsTogglingThisWeek] = useState(false);
+
+  // Present only for recipes imported after this feature shipped — absent
+  // (not an error) for manual recipes and for anything saved before it
+  // existed. Never refetched after the initial load: it can't change.
+  const [original, setOriginal] = useState<RecipeOriginal | null>(null);
+  const [isOriginalOpen, setIsOriginalOpen] = useState(false);
 
   useEffect(() => {
     async function loadRecipe() {
@@ -103,6 +112,13 @@ export default function RecipeDetailPage() {
     }
 
     loadThisWeekStatus();
+  }, [recipeId]);
+
+  // Independent of the recipe load above, same as This Week status — a
+  // missing/failed lookup just means no "View original" affordance, not a
+  // page-level error.
+  useEffect(() => {
+    getRecipeOriginal(recipeId).then(setOriginal);
   }, [recipeId]);
 
   // Subscribe to Realtime changes for this one recipe so another device's
@@ -410,6 +426,19 @@ export default function RecipeDetailPage() {
             >
               Found via Pinterest
             </a>
+          )}
+
+          {original && (
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => setIsOriginalOpen((current) => !current)}
+                className="self-start rounded-full bg-surface-muted px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-border"
+              >
+                {isOriginalOpen ? "Hide original" : "View original"}
+              </button>
+              {isOriginalOpen && <RecipeOriginalView original={original} />}
+            </div>
           )}
 
           {recipe.notes && (

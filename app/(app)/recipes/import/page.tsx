@@ -225,7 +225,7 @@ export default function ImportRecipePage() {
   }
 
   async function handleSave(input: RecipeSaveInput): Promise<string | null> {
-    const { id, error } = await createRecipe(input);
+    const { id, error } = await createRecipe(input, "photo");
     if (error) {
       return error;
     }

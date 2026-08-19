@@ -33,6 +33,33 @@ export type RecipeStep = {
   text: string;
 };
 
+// Which import pipeline produced a recipe_originals snapshot. A Pin with a
+// destination link is handed to the URL importer, so it's still "pinterest"
+// even though it runs through the same code path as a plain URL import —
+// callers pass this explicitly rather than it being inferred from the URL.
+export type RecipeOriginalSourceType = "url" | "photo" | "pinterest";
+
+// The immutable snapshot of what was accepted at the first import-review
+// save, before any later household editing. Never written to again after
+// insert. Absent (no row) for manual recipes and for recipes saved before
+// this feature existed — both are treated the same by callers: no original
+// to show.
+export type RecipeOriginal = {
+  recipe_id: string;
+  source_type: RecipeOriginalSourceType;
+  captured_at: string;
+  title: string;
+  servings: string | null;
+  prep_time_minutes: number | null;
+  cook_time_minutes: number | null;
+  total_time_minutes: number | null;
+  source_url: string | null;
+  pinterest_pin_url: string | null;
+  image_url: string | null;
+  ingredients: string[];
+  steps: string[];
+};
+
 export function sortByPosition<T extends { position: number }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => a.position - b.position);
 }
@@ -133,8 +160,15 @@ async function insertChildren(recipeId: string, input: RecipeSaveInput): Promise
 // Shared by /recipes/new and the photo importer's review step — both create
 // a recipe row plus its ingredient/step children, and roll back the recipe
 // row if the children insert fails so a partial recipe never sticks around.
+//
+// originalSourceType is passed only by the three import review flows
+// (URL/photo/Pinterest) — manual creation omits it, so manual recipes never
+// get a recipe_originals row. When set, the snapshot is captured from this
+// exact same `input` (the values the household just accepted in review), not
+// from anything raw/pre-review — see decision on recipe_originals.
 export async function createRecipe(
-  input: RecipeSaveInput
+  input: RecipeSaveInput,
+  originalSourceType?: RecipeOriginalSourceType
 ): Promise<{ id: string; error: null } | { id: null; error: string }> {
   const { data: recipe, error: recipeError } = await supabase
     .from("recipes")
@@ -167,5 +201,55 @@ export async function createRecipe(
     return { id: null, error: `Couldn't save recipe: ${childrenError}` };
   }
 
+  if (originalSourceType) {
+    // Best-effort, deliberately not rolled back on failure: the household
+    // recipe above is the primary artifact and already saved successfully —
+    // the household did real work (importing, reviewing) to get here. If
+    // this insert fails, the recipe is simply left without a preserved
+    // original, the same graceful state as a manual recipe or one saved
+    // before this feature existed (View original just isn't offered).
+    // Losing that provenance isn't worth discarding the recipe over, and
+    // this table is never written to again after this call, so there's no
+    // later chance to retry it transparently.
+    const { error: originalError } = await supabase.from("recipe_originals").insert({
+      recipe_id: recipe.id,
+      source_type: originalSourceType,
+      title: input.title,
+      servings: input.servings,
+      prep_time_minutes: input.prepTimeMinutes,
+      cook_time_minutes: input.cookTimeMinutes,
+      total_time_minutes: input.totalTimeMinutes,
+      source_url: input.sourceUrl,
+      pinterest_pin_url: input.pinterestPinUrl ?? null,
+      image_url: input.imageUrl ?? null,
+      ingredients: input.ingredients,
+      steps: input.steps,
+    });
+
+    if (originalError) {
+      console.error("Couldn't save recipe_originals snapshot:", originalError.message);
+    }
+  }
+
   return { id: recipe.id, error: null };
+}
+
+// Returns null both when no snapshot exists (manual recipe, legacy recipe
+// predating this feature, or a snapshot insert that failed) and on a read
+// error — callers treat "no original to show" as the only outcome that
+// matters, never distinguishing why.
+export async function getRecipeOriginal(recipeId: string): Promise<RecipeOriginal | null> {
+  const { data, error } = await supabase
+    .from("recipe_originals")
+    .select(
+      "recipe_id, source_type, captured_at, title, servings, prep_time_minutes, cook_time_minutes, total_time_minutes, source_url, pinterest_pin_url, image_url, ingredients, steps"
+    )
+    .eq("recipe_id", recipeId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data as RecipeOriginal;
 }

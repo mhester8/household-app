@@ -139,7 +139,14 @@ export default function ImportRecipeFromUrlPage() {
     // RecipeForm has no image field of its own (Phase 2) — the draft's
     // JSON-LD-derived image is merged in here, at the one call site that
     // has it, rather than threading it through RecipeForm's generic input.
-    const { id, error } = await createRecipe({ ...input, imageUrl: draft?.imageUrl ?? null, pinterestPinUrl });
+    // A Pin with a destination link is handed to this same URL-import flow
+    // (see the Pinterest page's handleImportPin), so pinterestPinUrl being
+    // set is what actually distinguishes a Pinterest-sourced save here, not
+    // which route the user is on.
+    const { id, error } = await createRecipe(
+      { ...input, imageUrl: draft?.imageUrl ?? null, pinterestPinUrl },
+      pinterestPinUrl ? "pinterest" : "url"
+    );
     if (error) {
       return error;
     }

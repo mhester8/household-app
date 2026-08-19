@@ -110,7 +110,10 @@ export default function ImportRecipeFromPinPage() {
     // RecipeForm has no image field of its own (Phase 2) — the draft's Pin
     // image is merged in here, at the one call site that has it, same as
     // the URL importer does with its JSON-LD-derived image.
-    const { id, error } = await createRecipe({ ...input, imageUrl: draft?.imageUrl ?? null, pinterestPinUrl });
+    const { id, error } = await createRecipe(
+      { ...input, imageUrl: draft?.imageUrl ?? null, pinterestPinUrl },
+      "pinterest"
+    );
     if (error) {
       return error;
     }

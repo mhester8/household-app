@@ -87,6 +87,7 @@ One shared, realtime-synced list (`grocery_items`). Add/edit/complete/delete wit
 - **Pantry basics** (shared list): filters ingredient-review by whole-word match against a small household vocabulary.
 - **This Week**: a shared queue with an optional per-entry `desired_servings` override; "Add to shopping list" pools (and optionally scales) ingredients across every queued recipe.
 - Every import source converges on the same `RecipeForm` review/save step before anything is persisted (decisions 006–007) — no direct-save import path exists or should be added.
+- **Preserved original** (decision 011): a recipe imported via URL, photo, or Pinterest gets one immutable `recipe_originals` row (1:1 via `recipe_id`, `on delete cascade`), captured by `createRecipe`'s optional `originalSourceType` argument at the *first* save after import review — not the raw pre-review extraction. Manual recipes and recipes saved before this feature shipped have no row; the detail page's "View original" button (`components/RecipeOriginalView.tsx`) simply doesn't render when `getRecipeOriginal` finds none. Subsequent edits never touch this table. It's excluded from the Library/search/This Week/Realtime queries by construction — nothing selects it except the detail page's own lookup.
 
 ### Notes
 
@@ -137,7 +138,7 @@ No Supabase **service-role** key is used or referenced anywhere. Actual producti
 
 **Schema and RLS policies are hand-managed in the Supabase dashboard — no migrations directory exists in this repo.** The following is reconstructed from columns the app actually selects/inserts/updates; treat it as reasonably reliable, not an authoritative schema dump.
 
-Shared: `grocery_items` (id, name, completed, created_at) · `pantry_basics` (id, name, created_at; unique on name) · `recipes` (id, title, source_url, notes, servings, prep/cook/total_time_minutes, image_url, pinterest_pin_url, created_at) · `recipe_ingredients` / `recipe_steps` (id, recipe_id, position, text) · `this_week_recipes` (id, recipe_id, added_at, desired_servings; unique on recipe_id) · `notes` (id, title, body, pinned, archived_at, created_at, updated_at).
+Shared: `grocery_items` (id, name, completed, created_at) · `pantry_basics` (id, name, created_at; unique on name) · `recipes` (id, title, source_url, notes, servings, prep/cook/total_time_minutes, image_url, pinterest_pin_url, created_at) · `recipe_ingredients` / `recipe_steps` (id, recipe_id, position, text) · `recipe_originals` (recipe_id PK/FK → recipes.id on delete cascade, source_type, captured_at, title, servings, prep/cook/total_time_minutes, source_url, pinterest_pin_url, image_url, ingredients jsonb, steps jsonb — decision 011; written once at creation, never updated) · `this_week_recipes` (id, recipe_id, added_at, desired_servings; unique on recipe_id) · `notes` (id, title, body, pinned, archived_at, created_at, updated_at).
 
 Per-user (RLS-scoped): `workout_templates` (id, name, created_at) · `template_exercises` (id, template_id, position, name, sets, rest_seconds) · `workout_sessions` (id, template_id, name, started_at, completed_at; at most one row per user with completed_at IS NULL, enforced in the database) · `session_exercises` (snapshotted, not FK'd to templates) · `session_sets` (id, session_exercise_id, set_number, weight, reps, completed_at) · `pinterest_connections` (user_id unique, access/refresh tokens + expiries, scope, timestamps).
 
@@ -156,7 +157,7 @@ Per-user (RLS-scoped): `workout_templates` (id, name, created_at) · `template_e
 - **Recipe extraction never invents content** — a durable principle covering any current or future AI-assisted extraction, not just today's photo/Pinterest routes (see section 5).
 - **Direct browser → Supabase for normal reads/writes**, under RLS; API routes exist only where server-side work is genuinely required.
 - **Shared vs. per-user data is a deliberate, per-feature decision** (section 4), not a default.
-- **Snapshot, don't reference, when history must survive future edits** — `session_exercises` copying `template_exercises` is the precedent.
+- **Snapshot, don't reference, when history must survive future edits** — `session_exercises` copying `template_exercises` is the precedent; `recipe_originals` copying the accepted import-review values (decision 011) is the second application of it.
 - **Small, single-purpose routes/helpers**; shared logic lives in `lib/`, routes stay narrow.
 - **Never trust model output blindly, even under strict JSON-schema mode** — every OpenAI result is sanitized/reconciled against known-good server state.
 - **SSRF-safety for any server-side fetch of a user-/third-party-supplied URL** — reuse `lib/safeUrlFetch.ts`'s pattern rather than calling `fetch` directly. It knowingly doesn't close DNS-rebinding, a deliberate tradeoff for this app's two-user threat model.

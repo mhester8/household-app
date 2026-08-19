@@ -223,6 +223,31 @@ The household wants a second device/person to see or resume the same active shop
 
 ---
 
+## 011 - Imported recipes keep one immutable original snapshot, captured after import review
+
+**Date:** 2026-08-19
+
+**Status:** Active
+
+### Decision
+An imported recipe (URL, photo, or Pinterest) gets exactly one immutable `recipe_originals` row, attached 1:1 to its `recipes` row via `recipe_id` (`on delete cascade`). "Original" means the title/servings/times/ingredients/steps the household actually accepted at the *first* save after import review — not the raw pre-review extraction. It is written once, at creation, and never updated again. Normal recipe editing continues to only touch `recipes`/`recipe_ingredients`/`recipe_steps`, exactly as before this feature. Manual recipes never get a `recipe_originals` row, and existing recipes saved before this feature shipped are not backfilled — for both, "View original" is simply unavailable. The Recipe Library, search, This Week, and Realtime subscriptions continue to query only `recipes`/`this_week_recipes`; `recipe_originals` is never selected by any of them, so the preserved original can't appear as a second recipe anywhere.
+
+### Why
+- Preserves the recipe's starting point without creating a second, competing recipe card — Hester House still shows one household recipe (decision 006).
+- Lets the household freely customize that one recipe over time while still being able to see what it started from.
+- Import review (decision 007) is also where the household corrects OCR/parser/extraction mistakes — capturing the *raw* extraction as "the original" would risk permanently presenting AI/parsing errors as though they were the source recipe's actual content. Snapshotting what was reviewed and accepted keeps "original" meaning "what we started customizing from," which is the useful, honest claim.
+- Avoids building generalized version history, diffing, or restore tooling — one preserved snapshot, not Git for recipes.
+
+### Alternatives considered
+- Snapshotting the raw pre-review extraction instead (rejected — see Why; also would have required persisting extraction output somewhere it isn't today, since `/api/import-recipe*` are stateless).
+- Storing the original as extra columns/JSON on the `recipes` row itself instead of a separate table (rejected — weaker schema clarity, and every future `recipes` query would need to remember not to leak it, vs. a dedicated table nothing queries unless it explicitly asks to).
+- Backfilling originals for existing recipes from their current (already-edited) data (rejected — would misrepresent already-customized data as an authentic original).
+
+### Revisit when
+The household wants to re-import/refresh a recipe's original, restore the household version from its original, compare multiple historical versions, or a meaningful "original" concept for manually-created recipes — any of these would need real version-history infrastructure this decision deliberately avoids.
+
+---
+
 ## Maintenance Guidelines
 
 - Record only meaningful product or architectural decisions.
