@@ -1,6 +1,6 @@
 # Hester House — Project State
 
-_Last generated at commit `37e092a` ("Document current Hester House project state"), updated to reflect the Notes V1 milestone landing on top of it. This document is a snapshot, not a live source of truth — re-verify against the repo when facts matter._
+_Last generated at commit `37e092a` ("Document current Hester House project state"), updated to reflect the Notes V1 milestone landing on top of it, and again to reflect the Realtime lifecycle recovery work in commit `4c6b6b5` ("Add Realtime lifecycle recovery for mobile background/resume"). This document is a snapshot, not a live source of truth — re-verify against the repo when facts matter._
 
 This file is a shared briefing for AI coding assistants (Claude Code, ChatGPT, etc.) picking up work on this project. It should reduce the need to re-read the entire repository before making a change. It intentionally does not cover implementation trivia a coding agent can discover locally in seconds.
 
@@ -143,7 +143,7 @@ Per-user (RLS-scoped): `workout_templates` (id, name, created_at) · `template_e
 
 **Storage**: one bucket, `recipe-images`, public URLs, object path `{recipe_id}/{random-id}.{ext}`; a replace always uploads a new object and best-effort deletes the old one. **Manually confirmed created as public, with add/replace/delete photo flows tested successfully** (section 10).
 
-**Realtime**: subscribed on `grocery_items`, `recipes`, `recipe_ingredients`, `recipe_steps`, `this_week_recipes`, `notes`. Whether Realtime replication is enabled per-table in the live project is a dashboard setting not verifiable from Git — the app does show a visible error banner if a channel subscription fails.
+**Realtime**: subscribed on `grocery_items`, `recipes`, `recipe_ingredients`, `recipe_steps`, `this_week_recipes`, `notes`. Whether Realtime replication is enabled per-table in the live project is a dashboard setting not verifiable from Git. Every subscription goes through the shared lifecycle/recovery hook described in section 8 (decision 009) — a channel loss from a mobile background/resume cycle is recovered automatically, and the app only shows a user-facing warning if it stays unavailable for a sustained period, not on every transient blip.
 
 ---
 
@@ -161,6 +161,7 @@ Per-user (RLS-scoped): `workout_templates` (id, name, created_at) · `template_e
 - **Never trust model output blindly, even under strict JSON-schema mode** — every OpenAI result is sanitized/reconciled against known-good server state.
 - **SSRF-safety for any server-side fetch of a user-/third-party-supplied URL** — reuse `lib/safeUrlFetch.ts`'s pattern rather than calling `fetch` directly. It knowingly doesn't close DNS-rebinding, a deliberate tradeoff for this app's two-user threat model.
 - **Optimistic UI with reconciliation**, not blocking spinners, for shared-list mutations — apply locally, roll back with a retry-capable toast on failure, de-duplicate against the Realtime echo of one's own write.
+- **Realtime subscriptions share one lifecycle/recovery hook — `lib/useRealtimeSubscription.ts`** (decision 009). Every channel (Groceries, Recipes list, Recipe detail, This Week, the Recipes-layout This Week count, Notes list, and the open-note editor) is created/subscribed/cleaned up through it; each caller still owns its own `postgres_changes` bindings and reconciliation logic — the hook only centralizes lifecycle and recovery, not event handling. On `document.visibilitychange` back to visible, it proactively tears down and recreates the channel rather than trusting a pre-suspension `SUBSCRIBED` status, which can be stale — mobile browsers/PWAs can suspend JS and drop the WebSocket while backgrounded, with the failure (`CHANNEL_ERROR`, `TIMED_OUT`, socket close `1006`) only reported some time after resume. It also recovers on `online` and directly on `CHANNEL_ERROR`/`TIMED_OUT`, guarded by a short cooldown/mutex so near-simultaneous triggers can't cause duplicate recovery. A brief, successful reconnect is invisible to the user — a warning banner only appears after ~5 continuous seconds of unavailability and clears automatically once `SUBSCRIBED` succeeds. Expected/recoverable transport failures log via `console.warn`, not `console.error`, so they don't trip Next's dev error overlay.
 - **Real-device testing for meaningful shared-feature changes** (section 2) — phone usability and cross-device Realtime behavior are acceptance criteria, not afterthoughts.
 - **iOS only auto-opens the keyboard for a `focus()` call made synchronously inside the original trusted tap, on a field that already exists in the DOM at that instant** — a route navigation, or mounting the field later in an effect, both miss that window regardless of how short the delay is. Notes' inline composer (section 5) keeps its field permanently mounted (CSS-hidden, never `display:none`/`visibility:hidden`, which *would* block focus) specifically so a "quick capture" tap can focus it synchronously. Relevant to any future mobile-first capture-on-tap UI, not just Notes.
 
@@ -190,6 +191,7 @@ Intentionally **not** built — don't add speculatively without a product decisi
 - Pinterest OAuth was tested end-to-end against the live Pinterest app; connection persistence was confirmed across page refreshes and across devices for the same Hester House login.
 - Real Pinterest boards and Pins were retrieved successfully; both the URL-based Pin import path and the no-link image-extraction path were exercised successfully against a Pin with real recipe content, and a dud Pin (no actual recipe content) was correctly rejected rather than turned into a fabricated recipe.
 - Pinterest provenance (`pinterest_pin_url` / "Found via Pinterest") was confirmed showing on saved recipes.
+- Realtime mobile background/resume recovery (`lib/useRealtimeSubscription.ts`, decision 009) was manually validated on a real phone/PWA: after backgrounding long enough to break the WebSocket, the app recovered automatically on resume and received a second device's changes (Groceries, and at least one of Recipes/This Week/Notes) without a refresh, with no persistent error banner during normal successful recovery.
 
 ### Not verifiable from Git — check the relevant dashboard directly
 
@@ -207,5 +209,7 @@ Intentionally **not** built — don't add speculatively without a product decisi
 ## 11. Current project state
 
 The Pinterest recipe-import integration (closing out the "recipe import sources" arc from decisions 006–007) and Notes V1 (decision 008) are both complete, manually validated, and working. Groceries, workouts, the recipe library (manual/URL/photo/Pinterest import, scaling, pantry basics, This Week), and Notes (freeform shared notes, pinned/recent, search including archived, archive/restore, delete+undo, autosave, inline mobile-first capture, same-note Realtime) are all functioning end-to-end on the live production deployment.
+
+Realtime subscriptions across all of these shared features now recover automatically from the mobile background/resume socket failures that previously required a manual refresh, via the shared `lib/useRealtimeSubscription.ts` hook (decision 009) — manually validated on a real phone/PWA (section 10).
 
 The repository does not itself establish what the next priority is — `docs/decisions.md` has no open/pending decision, and there is no roadmap document. Treat "what's next" as an open question to ask the user rather than something to infer from the repo.

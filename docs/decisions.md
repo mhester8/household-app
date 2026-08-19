@@ -179,6 +179,29 @@ Real usage creates organization problems that pinned/recent/search/archive don't
 
 ---
 
+## 009 - Realtime connections are disposable and recoverable, standardized through a shared lifecycle hook
+
+**Date:** 2026-08-19
+
+**Status:** Active
+
+### Decision
+Treat mobile Realtime connections as disposable and recoverable rather than something to keep permanently alive. Standardize subscription lifecycle handling across every feature through one small shared hook, `lib/useRealtimeSubscription.ts`, that proactively recreates a channel on resume and silently heals transient failures instead of surfacing them to the user.
+
+### Why
+Mobile browsers and installed PWAs can suspend JavaScript execution and terminate the underlying WebSocket while backgrounded; trying to guarantee a permanently-live socket is not reliable on that platform. Real-device testing reproduced `CHANNEL_ERROR`, transport failure, and socket close `1006` after backgrounding and resuming, while proactively tearing down and recreating the channel on resume reliably restored cross-device updates.
+
+### Alternatives considered
+- Rely entirely on Supabase's automatic reconnect.
+- Keep independent per-feature subscription lifecycle code (the prior state — seven channels, each with its own drifted create/subscribe/cleanup logic).
+- Attempt to keep background sockets alive via the Realtime client's Web Worker heartbeat option.
+- Require a manual refresh to recover.
+
+### Revisit when
+The shared hook proves insufficient for future notification/offline requirements, Supabase changes its Realtime client's lifecycle/reconnect behavior materially, or the app introduces a different Realtime transport strategy.
+
+---
+
 ## Maintenance Guidelines
 
 - Record only meaningful product or architectural decisions.
