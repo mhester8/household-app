@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase/client";
 import { sortRecipesByCreatedAt, type Recipe } from "@/lib/recipes";
 import { gridCardMetadataLine } from "@/lib/recipeCardMeta";
 import { RecipeCard } from "@/components/RecipeCard";
+import { REALTIME_UNAVAILABLE_MESSAGE, useRealtimeSubscription } from "@/lib/useRealtimeSubscription";
 
 // Ingredient texts are kept per-recipe for the search box (title-or-
 // ingredient matching below) — the ingredient count itself is no longer
@@ -71,53 +72,46 @@ export default function RecipesPage() {
   // fetched; edits to an existing recipe's ingredients don't otherwise touch
   // this list (they're reflected on the detail page instead, and in search
   // after a refresh).
-  useEffect(() => {
-    const channel = supabase
-      .channel("recipes_changes")
-      .on<Recipe>(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "recipes" },
-        (payload) => {
-          const newRecipe = payload.new as Recipe;
-          setRecipes((current) => {
-            if (current.some((recipe) => recipe.id === newRecipe.id)) {
-              return current;
-            }
-            return sortRecipesByCreatedAt([...current, { ...newRecipe, ingredientTexts: [] }]);
-          });
-        }
-      )
-      .on<Recipe>(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "recipes" },
-        (payload) => {
-          const updated = payload.new as Recipe;
-          setRecipes((current) =>
-            current.map((recipe) => (recipe.id === updated.id ? { ...recipe, ...updated } : recipe))
-          );
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "DELETE", schema: "public", table: "recipes" },
-        (payload) => {
-          const deletedId = (payload.old as { id: string }).id;
-          setRecipes((current) => current.filter((recipe) => recipe.id !== deletedId));
-        }
-      )
-      .subscribe((status, err) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.error("Supabase Realtime subscription issue:", status, err);
-          setErrorMessage(
-            `Realtime updates are unavailable (${status}). Other people's changes won't appear until you refresh.`
-          );
-        }
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
+  useRealtimeSubscription({
+    channelName: "recipes_changes",
+    deps: [],
+    build: (channel) =>
+      channel
+        .on<Recipe>(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "recipes" },
+          (payload) => {
+            const newRecipe = payload.new as Recipe;
+            setRecipes((current) => {
+              if (current.some((recipe) => recipe.id === newRecipe.id)) {
+                return current;
+              }
+              return sortRecipesByCreatedAt([...current, { ...newRecipe, ingredientTexts: [] }]);
+            });
+          }
+        )
+        .on<Recipe>(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "recipes" },
+          (payload) => {
+            const updated = payload.new as Recipe;
+            setRecipes((current) =>
+              current.map((recipe) => (recipe.id === updated.id ? { ...recipe, ...updated } : recipe))
+            );
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "DELETE", schema: "public", table: "recipes" },
+          (payload) => {
+            const deletedId = (payload.old as { id: string }).id;
+            setRecipes((current) => current.filter((recipe) => recipe.id !== deletedId));
+          }
+        ),
+    onUnavailable: () => setErrorMessage(REALTIME_UNAVAILABLE_MESSAGE),
+    onRecovered: () =>
+      setErrorMessage((current) => (current === REALTIME_UNAVAILABLE_MESSAGE ? null : current)),
+  });
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const filteredRecipes = normalizedQuery

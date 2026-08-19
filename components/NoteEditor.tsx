@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase/client";
 import { type Note, formatNoteTimestamps } from "@/lib/notes";
 import { persistNote } from "@/lib/notePersistence";
 import { Toast, type ToastState } from "@/components/Toast";
+import { useRealtimeSubscription } from "@/lib/useRealtimeSubscription";
 
 const AUTOSAVE_DEBOUNCE_MS = 650;
 const ERROR_TOAST_MS = 6000;
@@ -162,10 +163,16 @@ export function NoteEditor({ noteId }: { noteId: string }) {
   // another device. Scoped to just this note's id (not the whole table),
   // and only ever reacts to UPDATE — archive/delete/other notes are out of
   // scope here, same as the rest of Notes' Realtime usage.
-  useEffect(() => {
-    const channel = supabase
-      .channel(`note_${noteId}_changes`)
-      .on<Note>(
+  // No visible banner here — a missed remote-update toast during an outage
+  // just means this device won't notice the other device's edit until its
+  // own next save (existing last-save-wins behavior, unchanged) — but the
+  // channel still gets the same lifecycle recovery as every other one so it
+  // doesn't silently die after a mobile background/resume.
+  useRealtimeSubscription({
+    channelName: `note_${noteId}_changes`,
+    deps: [noteId],
+    build: (channel) =>
+      channel.on<Note>(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "notes", filter: `id=eq.${noteId}` },
         (payload) => {
@@ -202,13 +209,8 @@ export function NoteEditor({ noteId }: { noteId: string }) {
           lastSavedRef.current = { title: incomingTitle, body: incomingBody };
           showToast({ message: "Updated on another device" }, REMOTE_UPDATE_TOAST_MS);
         }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [noteId]);
+      ),
+  });
 
   // Navigation safety net: a debounced save that's still pending when the
   // user leaves shouldn't be silently lost. In-app navigation unmounts this

@@ -8,6 +8,7 @@ import { persistNote } from "@/lib/notePersistence";
 import { NoteRow } from "@/components/NoteRow";
 import { LeafIcon } from "@/components/LeafIcon";
 import { Toast, type ToastState } from "@/components/Toast";
+import { REALTIME_UNAVAILABLE_MESSAGE, useRealtimeSubscription } from "@/lib/useRealtimeSubscription";
 
 const NOTE_COLUMNS = "id, title, body, pinned, archived_at, created_at, updated_at";
 
@@ -102,48 +103,38 @@ export default function NotesPage() {
 
   // Subscribe to Realtime changes so the other household member's adds,
   // edits, pins, archives, and deletes show up here without a refresh.
-  useEffect(() => {
-    if (!userId) {
-      return;
-    }
-
-    const channel = supabase
-      .channel("notes_changes")
-      .on<Note>(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "notes" },
-        (payload) => {
-          setNotes((current) => upsertNote(current, payload.new as Note));
-        }
-      )
-      .on<Note>(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "notes" },
-        (payload) => {
-          setNotes((current) => upsertNote(current, payload.new as Note));
-        }
-      )
-      .on<Note>(
-        "postgres_changes",
-        { event: "DELETE", schema: "public", table: "notes" },
-        (payload) => {
-          const deletedId = (payload.old as { id: string }).id;
-          setNotes((current) => current.filter((note) => note.id !== deletedId));
-        }
-      )
-      .subscribe((status, err) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.error("Supabase Realtime subscription issue:", status, err);
-          setErrorMessage(
-            `Realtime updates are unavailable (${status}). Other people's changes won't appear until you refresh.`
-          );
-        }
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [userId]);
+  useRealtimeSubscription({
+    channelName: "notes_changes",
+    enabled: !!userId,
+    deps: [userId],
+    build: (channel) =>
+      channel
+        .on<Note>(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "notes" },
+          (payload) => {
+            setNotes((current) => upsertNote(current, payload.new as Note));
+          }
+        )
+        .on<Note>(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "notes" },
+          (payload) => {
+            setNotes((current) => upsertNote(current, payload.new as Note));
+          }
+        )
+        .on<Note>(
+          "postgres_changes",
+          { event: "DELETE", schema: "public", table: "notes" },
+          (payload) => {
+            const deletedId = (payload.old as { id: string }).id;
+            setNotes((current) => current.filter((note) => note.id !== deletedId));
+          }
+        ),
+    onUnavailable: () => setErrorMessage(REALTIME_UNAVAILABLE_MESSAGE),
+    onRecovered: () =>
+      setErrorMessage((current) => (current === REALTIME_UNAVAILABLE_MESSAGE ? null : current)),
+  });
 
   function showToast(next: ToastState, durationMs: number) {
     if (toastTimerRef.current) {

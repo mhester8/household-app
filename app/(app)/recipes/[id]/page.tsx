@@ -17,6 +17,7 @@ import { IngredientReviewPanel, type IngredientReviewLine } from "@/components/I
 import { Toast, type ToastState } from "@/components/Toast";
 import { detailTimeSegments } from "@/lib/recipeTime";
 import { deleteRecipeImageIfOwned } from "@/lib/recipeImages";
+import { REALTIME_UNAVAILABLE_MESSAGE, useRealtimeSubscription } from "@/lib/useRealtimeSubscription";
 
 // Matches the toast durations used on the groceries page for the same tone.
 const ERROR_TOAST_MS = 6000;
@@ -109,114 +110,106 @@ export default function RecipeDetailPage() {
   // shows up here without a refresh. Scoped to recipeId via the
   // postgres_changes filter, same approach as the shopping list's channel,
   // just narrowed to one row.
-  useEffect(() => {
-    const channel = supabase
-      .channel("recipe_detail_changes")
-      .on<Recipe>(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "recipes", filter: `id=eq.${recipeId}` },
-        (payload) => {
-          setRecipe(payload.new as Recipe);
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "DELETE", schema: "public", table: "recipes", filter: `id=eq.${recipeId}` },
-        () => {
-          // Deleted from another device while this one is looking at it —
-          // there's nothing left to show, so leave for the list.
-          router.push("/recipes");
-        }
-      )
-      .on<RecipeIngredient>(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "recipe_ingredients",
-          filter: `recipe_id=eq.${recipeId}`,
-        },
-        (payload) => {
-          setIngredients((current) => upsertLine(current, payload.new as RecipeIngredient));
-        }
-      )
-      .on<RecipeIngredient>(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "recipe_ingredients",
-          filter: `recipe_id=eq.${recipeId}`,
-        },
-        (payload) => {
-          setIngredients((current) => upsertLine(current, payload.new as RecipeIngredient));
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "recipe_ingredients",
-          filter: `recipe_id=eq.${recipeId}`,
-        },
-        (payload) => {
-          const deletedId = (payload.old as { id: string }).id;
-          setIngredients((current) => removeLineById(current, deletedId));
-        }
-      )
-      .on<RecipeStep>(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "recipe_steps", filter: `recipe_id=eq.${recipeId}` },
-        (payload) => {
-          setSteps((current) => upsertLine(current, payload.new as RecipeStep));
-        }
-      )
-      .on<RecipeStep>(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "recipe_steps", filter: `recipe_id=eq.${recipeId}` },
-        (payload) => {
-          setSteps((current) => upsertLine(current, payload.new as RecipeStep));
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "DELETE", schema: "public", table: "recipe_steps", filter: `recipe_id=eq.${recipeId}` },
-        (payload) => {
-          const deletedId = (payload.old as { id: string }).id;
-          setSteps((current) => removeLineById(current, deletedId));
-        }
-      )
-      .on<ThisWeekRecipe>(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "this_week_recipes", filter: `recipe_id=eq.${recipeId}` },
-        (payload) => {
-          const row = payload.new as ThisWeekRecipe;
-          setIsInThisWeek(true);
-          setThisWeekRowId(row.id);
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "DELETE", schema: "public", table: "this_week_recipes", filter: `recipe_id=eq.${recipeId}` },
-        () => {
-          setIsInThisWeek(false);
-          setThisWeekRowId(null);
-        }
-      )
-      .subscribe((status, err) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.error("Supabase Realtime subscription issue:", status, err);
-          setRealtimeError(
-            `Realtime updates are unavailable (${status}). Other people's changes won't appear until you refresh.`
-          );
-        }
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [recipeId, router]);
+  useRealtimeSubscription({
+    channelName: "recipe_detail_changes",
+    deps: [recipeId, router],
+    build: (channel) =>
+      channel
+        .on<Recipe>(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "recipes", filter: `id=eq.${recipeId}` },
+          (payload) => {
+            setRecipe(payload.new as Recipe);
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "DELETE", schema: "public", table: "recipes", filter: `id=eq.${recipeId}` },
+          () => {
+            // Deleted from another device while this one is looking at it —
+            // there's nothing left to show, so leave for the list.
+            router.push("/recipes");
+          }
+        )
+        .on<RecipeIngredient>(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "recipe_ingredients",
+            filter: `recipe_id=eq.${recipeId}`,
+          },
+          (payload) => {
+            setIngredients((current) => upsertLine(current, payload.new as RecipeIngredient));
+          }
+        )
+        .on<RecipeIngredient>(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "recipe_ingredients",
+            filter: `recipe_id=eq.${recipeId}`,
+          },
+          (payload) => {
+            setIngredients((current) => upsertLine(current, payload.new as RecipeIngredient));
+          }
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "DELETE",
+            schema: "public",
+            table: "recipe_ingredients",
+            filter: `recipe_id=eq.${recipeId}`,
+          },
+          (payload) => {
+            const deletedId = (payload.old as { id: string }).id;
+            setIngredients((current) => removeLineById(current, deletedId));
+          }
+        )
+        .on<RecipeStep>(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "recipe_steps", filter: `recipe_id=eq.${recipeId}` },
+          (payload) => {
+            setSteps((current) => upsertLine(current, payload.new as RecipeStep));
+          }
+        )
+        .on<RecipeStep>(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "recipe_steps", filter: `recipe_id=eq.${recipeId}` },
+          (payload) => {
+            setSteps((current) => upsertLine(current, payload.new as RecipeStep));
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "DELETE", schema: "public", table: "recipe_steps", filter: `recipe_id=eq.${recipeId}` },
+          (payload) => {
+            const deletedId = (payload.old as { id: string }).id;
+            setSteps((current) => removeLineById(current, deletedId));
+          }
+        )
+        .on<ThisWeekRecipe>(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "this_week_recipes", filter: `recipe_id=eq.${recipeId}` },
+          (payload) => {
+            const row = payload.new as ThisWeekRecipe;
+            setIsInThisWeek(true);
+            setThisWeekRowId(row.id);
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "DELETE", schema: "public", table: "this_week_recipes", filter: `recipe_id=eq.${recipeId}` },
+          () => {
+            setIsInThisWeek(false);
+            setThisWeekRowId(null);
+          }
+        ),
+    onUnavailable: () => setRealtimeError(REALTIME_UNAVAILABLE_MESSAGE),
+    onRecovered: () => setRealtimeError(null),
+  });
 
   async function handleDelete() {
     setIsDeleting(true);

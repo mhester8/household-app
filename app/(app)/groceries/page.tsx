@@ -15,6 +15,7 @@ import { LeafIcon } from "@/components/LeafIcon";
 import { ItemActionsMenu } from "@/components/ItemActionsMenu";
 import { createId } from "@/lib/id";
 import { Toast, type ToastState } from "@/components/Toast";
+import { REALTIME_UNAVAILABLE_MESSAGE, useRealtimeSubscription } from "@/lib/useRealtimeSubscription";
 
 // How long an undo/error toast stays up before it auto-dismisses. Delete's
 // undo window and its toast share this duration on purpose: once the toast
@@ -111,64 +112,57 @@ export default function GroceriesPage() {
     loadItems();
   }, [userId]);
 
-  // Subscribe to Realtime changes so other browsers' writes show up without a refresh.
-  useEffect(() => {
-    if (!userId) {
-      return;
-    }
+  // Subscribe to Realtime changes so other browsers' writes show up without a
+  // refresh. useRealtimeSubscription owns the channel's lifecycle (including
+  // recovery after a mobile background/resume) — only the bindings and the
+  // status-to-banner mapping are feature-specific.
+  useRealtimeSubscription({
+    channelName: "grocery_items_changes",
+    enabled: !!userId,
+    deps: [userId],
+    build: (channel) =>
+      channel
+        .on<GroceryItem>(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "grocery_items" },
+          (payload) => {
+            const newItem = payload.new as GroceryItem;
+            const isOwnItem = localItemIdsRef.current.has(newItem.id);
 
-    const channel = supabase
-      .channel("grocery_items_changes")
-      .on<GroceryItem>(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "grocery_items" },
-        (payload) => {
-          const newItem = payload.new as GroceryItem;
-          const isOwnItem = localItemIdsRef.current.has(newItem.id);
+            setItems((currentItems) => upsertItem(currentItems, newItem));
 
-          setItems((currentItems) => upsertItem(currentItems, newItem));
-
-          if (!isOwnItem) {
-            setHighlightedIds((current) => new Set(current).add(newItem.id));
-            setTimeout(() => {
-              setHighlightedIds((current) => {
-                if (!current.has(newItem.id)) return current;
-                const next = new Set(current);
-                next.delete(newItem.id);
-                return next;
-              });
-            }, HIGHLIGHT_MS);
+            if (!isOwnItem) {
+              setHighlightedIds((current) => new Set(current).add(newItem.id));
+              setTimeout(() => {
+                setHighlightedIds((current) => {
+                  if (!current.has(newItem.id)) return current;
+                  const next = new Set(current);
+                  next.delete(newItem.id);
+                  return next;
+                });
+              }, HIGHLIGHT_MS);
+            }
           }
-        }
-      )
-      .on<GroceryItem>(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "grocery_items" },
-        (payload) => {
-          setItems((currentItems) => upsertItem(currentItems, payload.new as GroceryItem));
-        }
-      )
-      .on<GroceryItem>(
-        "postgres_changes",
-        { event: "DELETE", schema: "public", table: "grocery_items" },
-        (payload) => {
-          const deletedId = (payload.old as { id: string }).id;
-          setItems((currentItems) => currentItems.filter((item) => item.id !== deletedId));
-        }
-      )
-      .subscribe((status, err) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.error("Supabase Realtime subscription issue:", status, err);
-          setErrorMessage(
-            `Realtime updates are unavailable (${status}). Other people's changes won't appear until you refresh.`
-          );
-        }
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [userId]);
+        )
+        .on<GroceryItem>(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "grocery_items" },
+          (payload) => {
+            setItems((currentItems) => upsertItem(currentItems, payload.new as GroceryItem));
+          }
+        )
+        .on<GroceryItem>(
+          "postgres_changes",
+          { event: "DELETE", schema: "public", table: "grocery_items" },
+          (payload) => {
+            const deletedId = (payload.old as { id: string }).id;
+            setItems((currentItems) => currentItems.filter((item) => item.id !== deletedId));
+          }
+        ),
+    onUnavailable: () => setErrorMessage(REALTIME_UNAVAILABLE_MESSAGE),
+    onRecovered: () =>
+      setErrorMessage((current) => (current === REALTIME_UNAVAILABLE_MESSAGE ? null : current)),
+  });
 
   function showToast(next: ToastState, durationMs: number) {
     if (toastTimerRef.current) {

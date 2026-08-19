@@ -8,6 +8,7 @@ import { sortByAddedAt, type ThisWeekRecipe } from "@/lib/thisWeek";
 import { computeScaleFactor, parseNumericServings, scaleIngredientLine } from "@/lib/recipeServings";
 import { IngredientReviewPanel, type IngredientReviewLine } from "@/components/IngredientReviewPanel";
 import { Toast, type ToastState } from "@/components/Toast";
+import { REALTIME_UNAVAILABLE_MESSAGE, useRealtimeSubscription } from "@/lib/useRealtimeSubscription";
 
 const ERROR_TOAST_MS = 6000;
 
@@ -89,64 +90,57 @@ export default function ThisWeekPage() {
   // payload only carries the this_week_recipes row, so a follow-up query
   // fetches the recipe's title/servings before it's added to the list —
   // same shape as the recipes list page's own INSERT handler.
-  useEffect(() => {
-    const channel = supabase
-      .channel("this_week_changes")
-      .on<ThisWeekRecipe>(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "this_week_recipes" },
-        async (payload) => {
-          const row = payload.new as ThisWeekRecipe;
-          const { data: recipeRow } = await supabase
-            .from("recipes")
-            .select("title, servings")
-            .eq("id", row.recipe_id)
-            .maybeSingle();
+  useRealtimeSubscription({
+    channelName: "this_week_changes",
+    deps: [],
+    build: (channel) =>
+      channel
+        .on<ThisWeekRecipe>(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "this_week_recipes" },
+          async (payload) => {
+            const row = payload.new as ThisWeekRecipe;
+            const { data: recipeRow } = await supabase
+              .from("recipes")
+              .select("title, servings")
+              .eq("id", row.recipe_id)
+              .maybeSingle();
 
-          setQueue((current) => {
-            if (current.some((entry) => entry.id === row.id)) {
-              return current;
-            }
-            return sortByAddedAt([
-              ...current,
-              { ...row, title: recipeRow?.title ?? "Untitled recipe", servings: recipeRow?.servings ?? null },
-            ]);
-          });
-        }
-      )
-      .on<ThisWeekRecipe>(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "this_week_recipes" },
-        (payload) => {
-          const updated = payload.new as ThisWeekRecipe;
-          setQueue((current) =>
-            current.map((entry) =>
-              entry.id === updated.id ? { ...entry, desired_servings: updated.desired_servings } : entry
-            )
-          );
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "DELETE", schema: "public", table: "this_week_recipes" },
-        (payload) => {
-          const deletedId = (payload.old as { id: string }).id;
-          setQueue((current) => current.filter((entry) => entry.id !== deletedId));
-        }
-      )
-      .subscribe((status, err) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.error("Supabase Realtime subscription issue:", status, err);
-          setErrorMessage(
-            `Realtime updates are unavailable (${status}). Other people's changes won't appear until you refresh.`
-          );
-        }
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
+            setQueue((current) => {
+              if (current.some((entry) => entry.id === row.id)) {
+                return current;
+              }
+              return sortByAddedAt([
+                ...current,
+                { ...row, title: recipeRow?.title ?? "Untitled recipe", servings: recipeRow?.servings ?? null },
+              ]);
+            });
+          }
+        )
+        .on<ThisWeekRecipe>(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "this_week_recipes" },
+          (payload) => {
+            const updated = payload.new as ThisWeekRecipe;
+            setQueue((current) =>
+              current.map((entry) =>
+                entry.id === updated.id ? { ...entry, desired_servings: updated.desired_servings } : entry
+              )
+            );
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "DELETE", schema: "public", table: "this_week_recipes" },
+          (payload) => {
+            const deletedId = (payload.old as { id: string }).id;
+            setQueue((current) => current.filter((entry) => entry.id !== deletedId));
+          }
+        ),
+    onUnavailable: () => setErrorMessage(REALTIME_UNAVAILABLE_MESSAGE),
+    onRecovered: () =>
+      setErrorMessage((current) => (current === REALTIME_UNAVAILABLE_MESSAGE ? null : current)),
+  });
 
   function showToast(next: ToastState, durationMs: number) {
     if (toastTimerRef.current) {
