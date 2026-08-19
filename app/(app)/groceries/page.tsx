@@ -21,6 +21,7 @@ import {
   loadShoppingModeState,
   saveShoppingModeState,
 } from "@/lib/shoppingModePersistence";
+import { reconcileGroceryItemsWithSnapshot } from "@/lib/groceryReconciliation";
 
 // How long an undo/error toast stays up before it auto-dismisses. Delete's
 // undo window and its toast share this duration on purpose: once the toast
@@ -38,6 +39,15 @@ const HIGHLIGHT_MS = 2000;
 // instead of re-grouping on every keystroke-speed mutation.
 const CATEGORIZE_DEBOUNCE_MS = 1200;
 const UNSORTED_SECTION = "Unsorted";
+
+// The one authoritative-snapshot query, shared by the initial load and the
+// resume reconciliation below — same columns/order either way.
+function fetchGroceryItemsSnapshot() {
+  return supabase
+    .from("grocery_items")
+    .select("id, name, completed, created_at")
+    .order("created_at", { ascending: true });
+}
 
 export default function GroceriesPage() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -76,6 +86,14 @@ export default function GroceriesPage() {
   const pendingDeletesRef = useRef<Map<string, { item: GroceryItem; timer: ReturnType<typeof setTimeout> }>>(
     new Map()
   );
+  // Ids whose optimistic add hasn't been confirmed by Supabase yet — read by
+  // the resume reconciliation below so it never drops an in-flight add just
+  // because it predates the authoritative snapshot it's comparing against.
+  const pendingAddIdsRef = useRef<Set<string>>(new Set());
+  // Guards the resume reconciliation fetch itself, so rapid repeated
+  // hidden/visible flapping (quickly switching apps back and forth) can't
+  // pile up overlapping requests.
+  const isReconcilingRef = useRef(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Committing/cancelling an edit unmounts its input, which can synthesize a
   // trailing blur event — this flag stops that blur from re-committing.
@@ -108,10 +126,7 @@ export default function GroceriesPage() {
       setIsLoading(true);
       setErrorMessage(null);
 
-      const { data, error } = await supabase
-        .from("grocery_items")
-        .select("id, name, completed, created_at")
-        .order("created_at", { ascending: true });
+      const { data, error } = await fetchGroceryItemsSnapshot();
 
       if (error) {
         setErrorMessage(`Could not load grocery items: ${error.message}`);
@@ -122,6 +137,48 @@ export default function GroceriesPage() {
     }
 
     loadItems();
+  }, [userId]);
+
+  // Repairs local state after a genuine mobile background/resume. Realtime's
+  // own recovery (lib/useRealtimeSubscription.ts) only restores delivery of
+  // *future* postgres_changes events — it never replays whatever mutations
+  // happened elsewhere while the channel was down (confirmed by inspecting
+  // that hook: recovery always builds a brand-new channel, carrying no
+  // cursor or backlog across the old one). A plain hidden -> visible
+  // transition re-fetches the authoritative snapshot and reconciles it
+  // against local state; it deliberately doesn't wait for the Realtime
+  // channel to finish resubscribing, since this fetch is a plain Supabase
+  // query, entirely independent of that channel's own state.
+  useEffect(() => {
+    if (!userId) {
+      return;
+    }
+
+    async function handleVisibilityChange() {
+      if (document.visibilityState !== "visible" || isReconcilingRef.current) {
+        return;
+      }
+      isReconcilingRef.current = true;
+      try {
+        const { data } = await fetchGroceryItemsSnapshot();
+        if (!data) {
+          return;
+        }
+        setItems((currentItems) =>
+          reconcileGroceryItemsWithSnapshot(currentItems, data, {
+            pendingDeleteIds: new Set(pendingDeletesRef.current.keys()),
+            pendingAddIds: new Set(pendingAddIdsRef.current),
+          })
+        );
+      } finally {
+        isReconcilingRef.current = false;
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [userId]);
 
   // Subscribe to Realtime changes so other browsers' writes show up without a
@@ -258,13 +315,16 @@ export default function GroceriesPage() {
     };
 
     localItemIdsRef.current.add(id);
+    pendingAddIdsRef.current.add(id);
     setItems((currentItems) => upsertItem(currentItems, optimisticItem));
     setNewItemName("");
 
     try {
       const [data] = await insertGroceryItems([{ id, name: trimmed }]);
+      pendingAddIdsRef.current.delete(id);
       setItems((currentItems) => upsertItem(currentItems, data));
     } catch {
+      pendingAddIdsRef.current.delete(id);
       localItemIdsRef.current.delete(id);
       setItems((currentItems) => currentItems.filter((item) => item.id !== id));
       showToast(
