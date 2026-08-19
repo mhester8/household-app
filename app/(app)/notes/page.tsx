@@ -9,6 +9,7 @@ import { NoteRow } from "@/components/NoteRow";
 import { LeafIcon } from "@/components/LeafIcon";
 import { Toast, type ToastState } from "@/components/Toast";
 import { REALTIME_UNAVAILABLE_MESSAGE, useRealtimeSubscription } from "@/lib/useRealtimeSubscription";
+import { usePullToRefreshHandler } from "@/lib/PullToRefreshContext";
 
 const NOTE_COLUMNS = "id, title, body, pinned, archived_at, created_at, updated_at";
 
@@ -75,31 +76,40 @@ export default function NotesPage() {
   }, []);
 
   // Loads active and archived notes together in one query — search needs to
-  // cover both, so there's no separate "load the archive" round trip.
+  // cover both, so there's no separate "load the archive" round trip. Only
+  // ever calls setNotes — never touches composer state (composerTitle/
+  // composerBody/composerId), so re-running it (mount, or pull-to-refresh
+  // below) can't clear or overwrite an open draft.
+  async function loadNotes() {
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    const { data, error } = await supabase
+      .from("notes")
+      .select(NOTE_COLUMNS)
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      setErrorMessage(`Could not load notes: ${error.message}`);
+    } else {
+      setNotes(data ?? []);
+    }
+    setIsLoading(false);
+  }
+
   useEffect(() => {
     if (!userId) {
       return;
     }
-
-    async function loadNotes() {
-      setIsLoading(true);
-      setErrorMessage(null);
-
-      const { data, error } = await supabase
-        .from("notes")
-        .select(NOTE_COLUMNS)
-        .order("updated_at", { ascending: false });
-
-      if (error) {
-        setErrorMessage(`Could not load notes: ${error.message}`);
-      } else {
-        setNotes(data ?? []);
-      }
-      setIsLoading(false);
+    function runInitialLoad() {
+      loadNotes();
     }
-
-    loadNotes();
+    runInitialLoad();
   }, [userId]);
+
+  // Pull-to-refresh (global gesture in app/(app)/layout.tsx) re-runs the
+  // exact same load as the initial mount above.
+  usePullToRefreshHandler(loadNotes);
 
   // Subscribe to Realtime changes so the other household member's adds,
   // edits, pins, archives, and deletes show up here without a refresh.

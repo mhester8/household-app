@@ -9,6 +9,7 @@ import { computeScaleFactor, parseNumericServings, scaleIngredientLine } from "@
 import { IngredientReviewPanel, type IngredientReviewLine } from "@/components/IngredientReviewPanel";
 import { Toast, type ToastState } from "@/components/Toast";
 import { REALTIME_UNAVAILABLE_MESSAGE, useRealtimeSubscription } from "@/lib/useRealtimeSubscription";
+import { usePullToRefreshHandler } from "@/lib/PullToRefreshContext";
 
 const ERROR_TOAST_MS = 6000;
 
@@ -36,54 +37,61 @@ export default function ThisWeekPage() {
   // no-op), after which display falls back to the persisted/derived value.
   const [desiredServingsDrafts, setDesiredServingsDrafts] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    async function loadQueue() {
-      setIsLoading(true);
-      setErrorMessage(null);
+  async function loadQueue() {
+    setIsLoading(true);
+    setErrorMessage(null);
 
-      const { data: rows, error: rowsError } = await supabase
-        .from("this_week_recipes")
-        .select("id, recipe_id, added_at, desired_servings")
-        .order("added_at", { ascending: true });
+    const { data: rows, error: rowsError } = await supabase
+      .from("this_week_recipes")
+      .select("id, recipe_id, added_at, desired_servings")
+      .order("added_at", { ascending: true });
 
-      if (rowsError) {
-        setErrorMessage(`Could not load This Week: ${rowsError.message}`);
-        setIsLoading(false);
-        return;
-      }
-
-      const recipeIds = (rows ?? []).map((row) => row.recipe_id);
-      if (recipeIds.length === 0) {
-        setQueue([]);
-        setIsLoading(false);
-        return;
-      }
-
-      const { data: recipesData, error: recipesError } = await supabase
-        .from("recipes")
-        .select("id, title, servings")
-        .in("id", recipeIds);
-
-      if (recipesError) {
-        setErrorMessage(`Could not load This Week: ${recipesError.message}`);
-        setIsLoading(false);
-        return;
-      }
-
-      const titleByRecipeId = new Map((recipesData ?? []).map((recipe) => [recipe.id, recipe.title]));
-      const servingsByRecipeId = new Map((recipesData ?? []).map((recipe) => [recipe.id, recipe.servings]));
-      setQueue(
-        (rows ?? []).map((row) => ({
-          ...row,
-          title: titleByRecipeId.get(row.recipe_id) ?? "Untitled recipe",
-          servings: servingsByRecipeId.get(row.recipe_id) ?? null,
-        }))
-      );
+    if (rowsError) {
+      setErrorMessage(`Could not load This Week: ${rowsError.message}`);
       setIsLoading(false);
+      return;
     }
 
-    loadQueue();
+    const recipeIds = (rows ?? []).map((row) => row.recipe_id);
+    if (recipeIds.length === 0) {
+      setQueue([]);
+      setIsLoading(false);
+      return;
+    }
+
+    const { data: recipesData, error: recipesError } = await supabase
+      .from("recipes")
+      .select("id, title, servings")
+      .in("id", recipeIds);
+
+    if (recipesError) {
+      setErrorMessage(`Could not load This Week: ${recipesError.message}`);
+      setIsLoading(false);
+      return;
+    }
+
+    const titleByRecipeId = new Map((recipesData ?? []).map((recipe) => [recipe.id, recipe.title]));
+    const servingsByRecipeId = new Map((recipesData ?? []).map((recipe) => [recipe.id, recipe.servings]));
+    setQueue(
+      (rows ?? []).map((row) => ({
+        ...row,
+        title: titleByRecipeId.get(row.recipe_id) ?? "Untitled recipe",
+        servings: servingsByRecipeId.get(row.recipe_id) ?? null,
+      }))
+    );
+    setIsLoading(false);
+  }
+
+  useEffect(() => {
+    function runInitialLoad() {
+      loadQueue();
+    }
+    runInitialLoad();
   }, []);
+
+  // Pull-to-refresh (global gesture in app/(app)/layout.tsx) re-runs the
+  // exact same load as the initial mount above.
+  usePullToRefreshHandler(loadQueue);
 
   // Smallest Realtime setup for a shared queue: watch inserts/deletes, plus
   // updates now that `desired_servings` can be edited in place. An INSERT

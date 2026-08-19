@@ -7,6 +7,7 @@ import { sortRecipesByCreatedAt, type Recipe } from "@/lib/recipes";
 import { gridCardMetadataLine } from "@/lib/recipeCardMeta";
 import { RecipeCard } from "@/components/RecipeCard";
 import { REALTIME_UNAVAILABLE_MESSAGE, useRealtimeSubscription } from "@/lib/useRealtimeSubscription";
+import { usePullToRefreshHandler } from "@/lib/PullToRefreshContext";
 
 // Ingredient texts are kept per-recipe for the search box (title-or-
 // ingredient matching below) — the ingredient count itself is no longer
@@ -20,49 +21,56 @@ export default function RecipesPage() {
   const [isChoosingRecipeType, setIsChoosingRecipeType] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
-  useEffect(() => {
-    async function loadRecipes() {
-      setIsLoading(true);
-      setErrorMessage(null);
+  async function loadRecipes() {
+    setIsLoading(true);
+    setErrorMessage(null);
 
-      const [recipesResult, ingredientsResult] = await Promise.all([
-        supabase
-          .from("recipes")
-          .select(
-            "id, title, source_url, notes, servings, prep_time_minutes, cook_time_minutes, total_time_minutes, image_url, created_at"
-          )
-          .order("created_at", { ascending: true }),
-        supabase.from("recipe_ingredients").select("recipe_id, text"),
-      ]);
+    const [recipesResult, ingredientsResult] = await Promise.all([
+      supabase
+        .from("recipes")
+        .select(
+          "id, title, source_url, notes, servings, prep_time_minutes, cook_time_minutes, total_time_minutes, image_url, created_at"
+        )
+        .order("created_at", { ascending: true }),
+      supabase.from("recipe_ingredients").select("recipe_id, text"),
+    ]);
 
-      if (recipesResult.error || ingredientsResult.error) {
-        setErrorMessage(
-          `Could not load recipes: ${
-            recipesResult.error?.message ?? ingredientsResult.error?.message
-          }`
-        );
-        setIsLoading(false);
-        return;
-      }
-
-      const textsByRecipeId = new Map<string, string[]>();
-      for (const row of ingredientsResult.data ?? []) {
-        const texts = textsByRecipeId.get(row.recipe_id) ?? [];
-        texts.push(row.text);
-        textsByRecipeId.set(row.recipe_id, texts);
-      }
-
-      setRecipes(
-        (recipesResult.data ?? []).map((recipe) => ({
-          ...recipe,
-          ingredientTexts: textsByRecipeId.get(recipe.id) ?? [],
-        }))
+    if (recipesResult.error || ingredientsResult.error) {
+      setErrorMessage(
+        `Could not load recipes: ${
+          recipesResult.error?.message ?? ingredientsResult.error?.message
+        }`
       );
       setIsLoading(false);
+      return;
     }
 
-    loadRecipes();
+    const textsByRecipeId = new Map<string, string[]>();
+    for (const row of ingredientsResult.data ?? []) {
+      const texts = textsByRecipeId.get(row.recipe_id) ?? [];
+      texts.push(row.text);
+      textsByRecipeId.set(row.recipe_id, texts);
+    }
+
+    setRecipes(
+      (recipesResult.data ?? []).map((recipe) => ({
+        ...recipe,
+        ingredientTexts: textsByRecipeId.get(recipe.id) ?? [],
+      }))
+    );
+    setIsLoading(false);
+  }
+
+  useEffect(() => {
+    function runInitialLoad() {
+      loadRecipes();
+    }
+    runInitialLoad();
   }, []);
+
+  // Pull-to-refresh (global gesture in app/(app)/layout.tsx) re-runs the
+  // exact same load as the initial mount above.
+  usePullToRefreshHandler(loadRecipes);
 
   // Subscribe to Realtime changes so another device's adds/edits/deletes show
   // up here without a refresh. Only the recipes table is watched — a brand
